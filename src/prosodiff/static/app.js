@@ -21,6 +21,7 @@ const recordedTakes = document.getElementById("recorded-takes");
 const recordedList = document.getElementById("recorded-list");
 const recordingCount = document.getElementById("recording-count");
 const uploadOption = document.getElementById("upload-option");
+const captureMetadataInput = document.getElementById("capture-metadata");
 
 if (form && fileInput) {
   const MINIMUM_RECORDING_SECONDS = 0.35;
@@ -57,6 +58,151 @@ if (form && fileInput) {
     const minutes = Math.floor(seconds / 60);
     const remainder = seconds - minutes * 60;
     return `${String(minutes).padStart(2, "0")}:${remainder.toFixed(1).padStart(4, "0")}`;
+  };
+
+  const dbfs = (amplitude) => 20 * Math.log10(Math.max(amplitude, 1e-12));
+
+  const quantile = (values, proportion) => {
+    if (!values.length) return -120;
+    const sorted = [...values].sort((a, b) => a - b);
+    const position = (sorted.length - 1) * proportion;
+    const lower = Math.floor(position);
+    const upper = Math.ceil(position);
+    const fraction = position - lower;
+    return sorted[lower] * (1 - fraction) + sorted[upper] * fraction;
+  };
+
+  const flattenChunks = (chunks, maximumSamples) => {
+    const available = chunks.reduce((total, chunk) => total + chunk.length, 0);
+    const length = Math.min(available, maximumSamples);
+    const samples = new Float32Array(length);
+    let offset = 0;
+    for (const chunk of chunks) {
+      if (offset >= length) break;
+      const remaining = length - offset;
+      samples.set(chunk.subarray(0, remaining), offset);
+      offset += Math.min(chunk.length, remaining);
+    }
+    return samples;
+  };
+
+  const inspectCapture = (samples, sampleRate) => {
+    let sum = 0;
+    let peak = 0;
+    let clippedSamples = 0;
+    let clippedRun = 0;
+    let hasClippedRun = false;
+    for (const sample of samples) {
+      sum += sample;
+      const absolute = Math.abs(sample);
+      peak = Math.max(peak, absolute);
+      if (absolute >= 0.999) {
+        clippedSamples += 1;
+        clippedRun += 1;
+        hasClippedRun ||= clippedRun >= 3;
+      } else {
+        clippedRun = 0;
+      }
+    }
+    const mean = samples.length ? sum / samples.length : 0;
+    const frameLength = Math.max(1, Math.round(sampleRate * 1024 / 22050));
+    const hopLength = Math.max(1, Math.round(sampleRate * 256 / 22050));
+    const frameLevels = [];
+    for (let start = 0; start + frameLength <= samples.length; start += hopLength) {
+      let squareSum = 0;
+      for (let index = start; index < start + frameLength; index += 1) {
+        const centered = samples[index] - mean;
+        squareSum += centered * centered;
+      }
+      frameLevels.push(Math.max(-120, dbfs(Math.sqrt(squareSum / frameLength))));
+    }
+    const q10 = quantile(frameLevels, 0.10);
+    const q90 = quantile(frameLevels, 0.90);
+    const threshold = Math.min(q90 - 12, Math.max(q10 + 6, q90 - 35));
+    const activeLevels = frameLevels.filter((value) => value >= threshold);
+    return {
+      activeRmsDbfs: quantile(activeLevels, 0.50),
+      peakDbfs: dbfs(peak),
+      peak,
+      clippedFraction: samples.length ? clippedSamples / samples.length : 0,
+      hasClippedRun,
+    };
+  };
+
+  const trackValue = (settings, key) => (
+    Object.prototype.hasOwnProperty.call(settings, key) ? settings[key] : null
+  );
+
+  const updateDerivedQa = () => {
+    const reference = recordings[0];
+    recordings.forEach((recording, index) => {
+      const codes = [];
+      const messages = [];
+      if (recording.qa.activeRmsDbfs < -35) {
+        codes.push("LOW_LEVEL");
+        messages.push(`level ${recording.qa.activeRmsDbfs.toFixed(1)} dBFS is below the -35 dBFS review floor`);
+      }
+      if (recording.qa.clippedFraction >= 0.001 || recording.qa.hasClippedRun) {
+        codes.push("CLIPPING");
+        messages.push(`${(recording.qa.clippedFraction * 100).toFixed(2)}% of samples approach full scale`);
+      }
+      if (index > 0 && reference) {
+        const difference = recording.qa.activeRmsDbfs - reference.qa.activeRmsDbfs;
+        if (Math.abs(difference) > 6) {
+          codes.push("LEVEL_MISMATCH");
+          messages.push(`${Math.abs(difference).toFixed(1)} dB ${difference < 0 ? "quieter" : "louder"} than Reference`);
+        }
+      }
+      const referenceDevice = reference?.deviceId || null;
+      recording.sameDeviceAsReference = index === 0
+        ? (recording.deviceId ? true : null)
+        : (referenceDevice && recording.deviceId
+          ? recording.deviceId === referenceDevice
+          : null);
+      if (recording.sameDeviceAsReference === false) {
+        codes.push("DEVICE_CHANGED");
+        messages.push("input device differs from Reference");
+      }
+      recording.qa.codes = codes;
+      recording.qa.messages = messages;
+      recording.qa.redoRecommended = codes.length > 0;
+    });
+  };
+
+  const syncCaptureMetadata = () => {
+    if (!captureMetadataInput) return;
+    if (sourceMode !== "record" || recordings.length === 0) {
+      captureMetadataInput.value = "";
+      return;
+    }
+    captureMetadataInput.value = JSON.stringify({
+      schema_version: "0.1.0",
+      takes: recordings.map((recording) => ({
+        source: "live",
+        wav: {
+          sample_rate_hz: recording.sampleRate,
+          channels: 1,
+          duration_s: recording.duration,
+        },
+        track: {
+          sample_rate_hz: recording.trackSettings.sampleRate,
+          channel_count: recording.trackSettings.channelCount,
+          sample_size_bits: recording.trackSettings.sampleSize,
+          latency_s: recording.trackSettings.latency,
+          echo_cancellation: recording.trackSettings.echoCancellation,
+          noise_suppression: recording.trackSettings.noiseSuppression,
+          auto_gain_control: recording.trackSettings.autoGainControl,
+          same_device_as_reference: recording.sameDeviceAsReference,
+        },
+        constraints_fallback: recording.constraintsFallback,
+        client_qa: {
+          active_rms_estimate_dbfs: recording.qa.activeRmsDbfs,
+          peak_dbfs: recording.qa.peakDbfs,
+          clipped_sample_fraction: recording.qa.clippedFraction,
+          codes: recording.qa.codes,
+        },
+      })),
+    });
   };
 
   const showRecordingError = (message = "") => {
@@ -129,6 +275,7 @@ if (form && fileInput) {
   };
 
   const syncRecordedFiles = () => {
+    updateDerivedQa();
     const transfer = new DataTransfer();
     recordings.forEach((recording, index) => {
       transfer.items.add(new File(
@@ -138,18 +285,22 @@ if (form && fileInput) {
       ));
     });
     fileInput.files = transfer.files;
+    syncCaptureMetadata();
     setFileValidity();
   };
 
   const clearRecordedTakes = () => {
     recordings.forEach((recording) => URL.revokeObjectURL(recording.url));
     recordings = [];
+    syncCaptureMetadata();
     recordedList.replaceChildren();
     recordedTakes.hidden = true;
     recordingCount.textContent = "";
   };
 
   const renderRecordedTakes = () => {
+    updateDerivedQa();
+    syncCaptureMetadata();
     recordedList.replaceChildren();
     recordedTakes.hidden = recordings.length === 0;
 
@@ -166,6 +317,43 @@ if (form && fileInput) {
       const reference = document.createElement("small");
       reference.textContent = index === 0 ? "delta reference" : "recorded live";
       header.append(marker, title, reference);
+
+      const qa = document.createElement("div");
+      qa.className = `take-qa${recording.qa.redoRecommended ? " is-review" : ""}`;
+      const qaStatus = document.createElement("strong");
+      qaStatus.textContent = recording.qa.redoRecommended
+        ? "Redo recommended"
+        : "Level check passed";
+      const qaValues = document.createElement("span");
+      qaValues.textContent = `speech RMS estimate ${recording.qa.activeRmsDbfs.toFixed(1)} dBFS · peak ${recording.qa.peakDbfs.toFixed(1)} dBFS`;
+      qa.append(qaStatus, qaValues);
+      if (recording.qa.messages.length) {
+        const qaReasons = document.createElement("small");
+        qaReasons.textContent = recording.qa.messages.join(" · ");
+        qa.append(qaReasons);
+      }
+
+      const processingNames = [
+        ["echo cancellation", recording.trackSettings.echoCancellation],
+        ["noise suppression", recording.trackSettings.noiseSuppression],
+        ["auto gain", recording.trackSettings.autoGainControl],
+      ];
+      const activeProcessing = processingNames
+        .filter(([, value]) => value === true)
+        .map(([name]) => name);
+      const unknownProcessing = processingNames.some(([, value]) => value === null);
+      let captureNoticeText = "";
+      if (activeProcessing.length) {
+        captureNoticeText = `Browser processing active: ${activeProcessing.join(", ")}.`;
+      } else if (unknownProcessing) {
+        captureNoticeText = "The browser did not report every processing setting.";
+      } else if (recording.constraintsFallback) {
+        captureNoticeText = "Capture started after retrying without exact constraints.";
+      }
+      const captureNotice = document.createElement("small");
+      captureNotice.className = "capture-note";
+      captureNotice.textContent = captureNoticeText;
+      captureNotice.hidden = !captureNoticeText;
 
       const audio = document.createElement("audio");
       audio.controls = true;
@@ -210,7 +398,7 @@ if (form && fileInput) {
       });
       actions.append(redo, remove);
 
-      article.append(header, audio, label, actions);
+      article.append(header, qa, captureNotice, audio, label, actions);
       recordedList.append(article);
     });
 
@@ -303,27 +491,41 @@ if (form && fileInput) {
     }
     resetCaptureUi();
 
-    const availableSamples = capture.chunks.reduce(
-      (total, chunk) => total + chunk.length,
-      0
-    );
     const maximumSamples = Math.floor(capture.sampleRate * MAXIMUM_RECORDING_SECONDS);
-    const sampleCount = Math.min(availableSamples, maximumSamples);
-    const duration = sampleCount / capture.sampleRate;
+    const samples = flattenChunks(capture.chunks, maximumSamples);
+    const duration = samples.length / capture.sampleRate;
     if (duration < MINIMUM_RECORDING_SECONDS) {
-      showRecordingError("That take was too short. Record for at least one second.");
+      showRecordingError("That take was too short. Record for at least 0.35 seconds.");
+      recorderTitle.textContent = "Microphone ready";
+      updateReadyState();
+      return;
+    }
+    const qa = inspectCapture(samples, capture.sampleRate);
+    if (qa.peak < 1e-6) {
+      showRecordingError("No microphone signal was captured. Check the input and record again.");
       recorderTitle.textContent = "Microphone ready";
       updateReadyState();
       return;
     }
 
-    const blob = encodeWav(capture.chunks, capture.sampleRate, maximumSamples);
+    const blob = encodeWav([samples], capture.sampleRate, samples.length);
     const previous = capture.replaceIndex === null ? null : recordings[capture.replaceIndex];
     const recording = {
       blob,
       duration,
       label: previous?.label || recordedLabel(capture.replaceIndex ?? recordings.length),
       url: URL.createObjectURL(blob),
+      sampleRate: capture.sampleRate,
+      trackSettings: capture.trackSettings,
+      constraintsFallback: capture.constraintsFallback,
+      deviceId: capture.deviceId,
+      sameDeviceAsReference: null,
+      qa: {
+        ...qa,
+        codes: [],
+        messages: [],
+        redoRecommended: false,
+      },
     };
     if (capture.replaceIndex === null) {
       recordings.push(recording);
@@ -349,16 +551,47 @@ if (form && fileInput) {
     showRecordingError();
     let stream = null;
     let context = null;
+    let constraintsFallback = false;
 
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          channelCount: { ideal: 1 },
-          echoCancellation: { ideal: false },
-          noiseSuppression: { ideal: false },
-          autoGainControl: { ideal: false },
-        },
+      const referenceDevice = recordings[0]?.deviceId || null;
+      const audioConstraints = (exact) => ({
+        channelCount: { ideal: 1 },
+        echoCancellation: { [exact ? "exact" : "ideal"]: false },
+        noiseSuppression: { [exact ? "exact" : "ideal"]: false },
+        autoGainControl: { [exact ? "exact" : "ideal"]: false },
+        ...(referenceDevice ? { deviceId: { ideal: referenceDevice } } : {}),
       });
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: audioConstraints(true),
+        });
+      } catch (error) {
+        const canRetry = ["OverconstrainedError", "NotSupportedError", "TypeError"]
+          .includes(error?.name);
+        if (!canRetry) throw error;
+        constraintsFallback = true;
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: audioConstraints(false),
+        });
+      }
+      const track = stream.getAudioTracks()[0];
+      if (!track) throw new Error("No audio track was returned.");
+      try {
+        track.contentHint = "music";
+      } catch {
+        // contentHint is advisory and is not implemented by every browser.
+      }
+      const settings = track.getSettings?.() || {};
+      const trackSettings = {
+        sampleRate: trackValue(settings, "sampleRate"),
+        channelCount: trackValue(settings, "channelCount"),
+        sampleSize: trackValue(settings, "sampleSize"),
+        latency: trackValue(settings, "latency"),
+        echoCancellation: trackValue(settings, "echoCancellation"),
+        noiseSuppression: trackValue(settings, "noiseSuppression"),
+        autoGainControl: trackValue(settings, "autoGainControl"),
+      };
       context = new AudioContextConstructor();
       await context.resume();
       const source = context.createMediaStreamSource(stream);
@@ -378,7 +611,8 @@ if (form && fileInput) {
           squareSum += samples[index] * samples[index];
         }
         const rms = Math.sqrt(squareSum / samples.length);
-        levelValue.style.transform = `scaleX(${Math.min(1, rms * 9)})`;
+        const meterDbfs = dbfs(rms);
+        levelValue.style.transform = `scaleX(${Math.max(0, Math.min(1, (meterDbfs + 60) / 60))})`;
       };
       source.connect(processor);
       processor.connect(silentGain);
@@ -399,6 +633,9 @@ if (form && fileInput) {
         silentGain,
         chunks,
         sampleRate: context.sampleRate,
+        trackSettings,
+        constraintsFallback,
+        deviceId: typeof settings.deviceId === "string" ? settings.deviceId : null,
         startedAt: performance.now(),
         replaceIndex,
       };

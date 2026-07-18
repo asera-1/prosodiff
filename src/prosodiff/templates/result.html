@@ -67,12 +67,20 @@
         </div>
       </section>
 
-      {% if warnings %}
+      {% if warning_groups %}
       <details class="notices">
-        <summary><span>Analysis notices</span><b>{{ warnings|length }}</b></summary>
-        <ul>{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+        <summary><span>Analysis checks</span><b>{{ warning_groups|length }}</b></summary>
+        <div class="notice-groups">
+          {% for group in warning_groups %}
+          <section class="notice-group">
+            <header><strong>{{ group.title }}</strong><code>{{ group.code }}</code>{% if group.count > 1 %}<span>{{ group.count }} takes/pairs</span>{% endif %}</header>
+            <ul>{% for message in group.messages %}<li>{{ message }}</li>{% endfor %}</ul>
+          </section>
+          {% endfor %}
+        </div>
       </details>
       {% endif %}
+      <p class="method-note"><strong>Recording protocol</strong> Compare back-to-back takes with the same device, gain, distance, and room. Browser processing settings are retained in JSON when reported.</p>
       <p class="privacy-note result-privacy"><span aria-hidden="true">●</span> Source WAVs deleted. Results disappear when this local server stops.</p>
     </aside>
   </div>

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import atexit
 import hmac
+import json
+import math
+import re
 import secrets
 import shutil
 import threading
@@ -11,7 +14,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 import soundfile as sf
 from flask import (
@@ -29,7 +32,7 @@ from werkzeug.exceptions import RequestEntityTooLarge
 
 from prosodiff.analysis import compare_takes
 from prosodiff.errors import ProsodiffError
-from prosodiff.models import Comparison
+from prosodiff.models import CaptureMetadata, Comparison
 from prosodiff.render import render_comparison
 from prosodiff.report import write_json_report
 
@@ -40,8 +43,35 @@ _MAX_FILE_BYTES = 24 * 1024 * 1024
 _MAX_LABEL_LENGTH = 64
 _MAX_TEXT_LENGTH = 300
 _MAX_RESULTS = 10
+_MAX_CAPTURE_METADATA_BYTES = 8 * 1024
 _READ_CHUNK_BYTES = 1024 * 1024
 _ANALYSIS_LOCK = threading.Lock()
+_WARNING_PATTERN = re.compile(r"^\[([A-Z0-9_]+)\]\s*(.*)$")
+_CLIENT_QA_CODES = {
+    "LOW_LEVEL",
+    "CLIPPING",
+    "LEVEL_MISMATCH",
+    "DEVICE_CHANGED",
+}
+_WARNING_TITLES = {
+    "PITCH_LOW_COVERAGE": "Pitch coverage",
+    "PITCH_REFERENCE_INCOMPLETE": "Pitch comparison",
+    "PITCH_BOUNDARY_HITS": "Pitch search range",
+    "PITCH_JUMPS_SUSPECT": "Pitch tracking",
+    "PAUSE_THRESHOLD_UNSTABLE": "Pause sensitivity",
+    "LOW_ENERGY_SEPARATION": "Speech/pause separation",
+    "PAIR_LEVEL_MISMATCH": "Recording-level mismatch",
+    "PAIR_DURATION_MISMATCH": "Duration mismatch",
+    "LOW_RECORDED_LEVEL": "Low recorded level",
+    "CLIPPING_DETECTED": "Clipping",
+    "EXCESSIVE_EDGE_SILENCE": "Edge silence",
+    "UTTERANCE_TOO_SHORT": "Short utterance",
+    "STEREO_DOWNMIX": "Stereo downmix",
+    "CAPTURE_PROCESSING_ACTIVE": "Browser processing active",
+    "CAPTURE_SETTINGS_UNKNOWN": "Browser settings unavailable",
+    "CAPTURE_DEVICE_CHANGED": "Input device changed",
+    "CAPTURE_CONSTRAINTS_FALLBACK": "Capture constraints fallback",
+}
 
 
 @dataclass(frozen=True)
@@ -183,8 +213,302 @@ def _delete_uploads(paths: list[Path]) -> None:
         path.unlink(missing_ok=True)
 
 
-def _deduplicated_warnings(comparison: Comparison) -> list[str]:
-    return list(dict.fromkeys(comparison.warnings))
+def _reject_json_constant(value: str) -> None:
+    raise ValueError(f"non-finite number {value}")
+
+
+def _mapping(value: object, context: str, allowed: set[str]) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{context} must be an object.")
+    unknown = set(value) - allowed
+    if unknown:
+        raise ValueError(f"{context} contains unsupported fields.")
+    return value
+
+
+def _optional_bool(value: object, context: str) -> bool | None:
+    if value is None or isinstance(value, bool):
+        return value
+    raise ValueError(f"{context} must be true, false, or null.")
+
+
+def _optional_number(
+    value: object,
+    context: str,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{context} must be a number or null.")
+    number = float(value)
+    if not math.isfinite(number) or not minimum <= number <= maximum:
+        raise ValueError(f"{context} is outside the supported range.")
+    return number
+
+
+def _optional_int(
+    value: object,
+    context: str,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int | None:
+    number = _optional_number(
+        value,
+        context,
+        minimum=float(minimum),
+        maximum=float(maximum),
+    )
+    if number is None:
+        return None
+    if not number.is_integer():
+        raise ValueError(f"{context} must be a whole number.")
+    return int(number)
+
+
+def _parse_capture_metadata(
+    raw: str,
+    *,
+    expected_count: int,
+) -> list[dict[str, Any]] | None:
+    """Validate untrusted, privacy-preserving metadata from live capture."""
+
+    if not raw:
+        return None
+    if len(raw.encode("utf-8")) > _MAX_CAPTURE_METADATA_BYTES:
+        raise ValueError("Capture metadata is too large. Record the takes again.")
+    try:
+        payload = json.loads(raw, parse_constant=_reject_json_constant)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("Capture metadata is invalid. Record the takes again.") from exc
+    payload = _mapping(payload, "Capture metadata", {"schema_version", "takes"})
+    if payload.get("schema_version") != "0.1.0":
+        raise ValueError("Capture metadata uses an unsupported schema version.")
+    takes = payload.get("takes")
+    if not isinstance(takes, list) or len(takes) != expected_count:
+        raise ValueError("Capture metadata must match the selected recordings.")
+
+    normalized: list[dict[str, Any]] = []
+    for index, raw_take in enumerate(takes, start=1):
+        context = f"Capture metadata for Take {index}"
+        take = _mapping(
+            raw_take,
+            context,
+            {"source", "wav", "track", "constraints_fallback", "client_qa"},
+        )
+        if take.get("source") != "live":
+            raise ValueError(f"{context} has an unsupported source.")
+        fallback = take.get("constraints_fallback", False)
+        if not isinstance(fallback, bool):
+            raise ValueError(f"{context} fallback flag must be true or false.")
+        wav = _mapping(
+            take.get("wav"),
+            f"{context} WAV",
+            {"sample_rate_hz", "channels", "duration_s"},
+        )
+        track = _mapping(
+            take.get("track"),
+            f"{context} track settings",
+            {
+                "sample_rate_hz",
+                "channel_count",
+                "sample_size_bits",
+                "latency_s",
+                "echo_cancellation",
+                "noise_suppression",
+                "auto_gain_control",
+                "same_device_as_reference",
+            },
+        )
+        qa = _mapping(
+            take.get("client_qa"),
+            f"{context} level check",
+            {
+                "active_rms_estimate_dbfs",
+                "peak_dbfs",
+                "clipped_sample_fraction",
+                "codes",
+            },
+        )
+        codes = qa.get("codes")
+        if not isinstance(codes, list) or len(codes) > 8:
+            raise ValueError(f"{context} level-check codes are invalid.")
+        if any(not isinstance(code, str) or code not in _CLIENT_QA_CODES for code in codes):
+            raise ValueError(f"{context} level-check codes are invalid.")
+
+        normalized.append(
+            {
+                "wav_sample_rate_hz": _optional_int(
+                    wav.get("sample_rate_hz"),
+                    f"{context} WAV sample rate",
+                    minimum=8_000,
+                    maximum=192_000,
+                ),
+                "wav_channels": _optional_int(
+                    wav.get("channels"),
+                    f"{context} WAV channels",
+                    minimum=1,
+                    maximum=32,
+                ),
+                "wav_duration_s": _optional_number(
+                    wav.get("duration_s"),
+                    f"{context} WAV duration",
+                    minimum=0.0,
+                    maximum=30.1,
+                ),
+                "track_sample_rate_hz": _optional_int(
+                    track.get("sample_rate_hz"),
+                    f"{context} track sample rate",
+                    minimum=8_000,
+                    maximum=192_000,
+                ),
+                "track_channel_count": _optional_int(
+                    track.get("channel_count"),
+                    f"{context} track channel count",
+                    minimum=1,
+                    maximum=32,
+                ),
+                "track_sample_size_bits": _optional_int(
+                    track.get("sample_size_bits"),
+                    f"{context} track sample size",
+                    minimum=8,
+                    maximum=64,
+                ),
+                "track_latency_s": _optional_number(
+                    track.get("latency_s"),
+                    f"{context} track latency",
+                    minimum=0.0,
+                    maximum=10.0,
+                ),
+                "echo_cancellation": _optional_bool(
+                    track.get("echo_cancellation"),
+                    f"{context} echo cancellation",
+                ),
+                "noise_suppression": _optional_bool(
+                    track.get("noise_suppression"),
+                    f"{context} noise suppression",
+                ),
+                "auto_gain_control": _optional_bool(
+                    track.get("auto_gain_control"),
+                    f"{context} auto gain control",
+                ),
+                "same_device_as_reference": _optional_bool(
+                    track.get("same_device_as_reference"),
+                    f"{context} device consistency",
+                ),
+                "constraints_fallback": fallback,
+                "client_active_rms_dbfs": _optional_number(
+                    qa.get("active_rms_estimate_dbfs"),
+                    f"{context} active RMS",
+                    minimum=-160.0,
+                    maximum=10.0,
+                ),
+                "client_peak_dbfs": _optional_number(
+                    qa.get("peak_dbfs"),
+                    f"{context} peak",
+                    minimum=-160.0,
+                    maximum=3.0,
+                ),
+                "client_clipped_fraction": _optional_number(
+                    qa.get("clipped_sample_fraction"),
+                    f"{context} clipped fraction",
+                    minimum=0.0,
+                    maximum=1.0,
+                ),
+                "client_qa_codes": tuple(codes),
+            }
+        )
+    return normalized
+
+
+def _capture_records(
+    paths: list[Path],
+    parsed: list[dict[str, Any]] | None,
+) -> list[CaptureMetadata]:
+    """Combine client provenance with server-observed WAV properties."""
+
+    records: list[CaptureMetadata] = []
+    for index, path in enumerate(paths):
+        info = sf.info(path)
+        client = parsed[index] if parsed is not None else None
+        records.append(
+            CaptureMetadata(
+                source="live" if client is not None else "upload",
+                client_reported=client is not None,
+                encoded_sample_rate_hz=int(info.samplerate),
+                encoded_channels=int(info.channels),
+                encoded_duration_s=float(info.duration),
+                track_sample_rate_hz=(
+                    client["track_sample_rate_hz"] if client is not None else None
+                ),
+                track_channel_count=(
+                    client["track_channel_count"] if client is not None else None
+                ),
+                track_sample_size_bits=(
+                    client["track_sample_size_bits"] if client is not None else None
+                ),
+                track_latency_s=(
+                    client["track_latency_s"] if client is not None else None
+                ),
+                echo_cancellation=(
+                    client["echo_cancellation"] if client is not None else None
+                ),
+                noise_suppression=(
+                    client["noise_suppression"] if client is not None else None
+                ),
+                auto_gain_control=(
+                    client["auto_gain_control"] if client is not None else None
+                ),
+                same_device_as_reference=(
+                    client["same_device_as_reference"] if client is not None else None
+                ),
+                constraints_fallback=(
+                    bool(client["constraints_fallback"])
+                    if client is not None
+                    else False
+                ),
+                client_active_rms_dbfs=(
+                    client["client_active_rms_dbfs"] if client is not None else None
+                ),
+                client_peak_dbfs=(
+                    client["client_peak_dbfs"] if client is not None else None
+                ),
+                client_clipped_fraction=(
+                    client["client_clipped_fraction"] if client is not None else None
+                ),
+                client_qa_codes=(
+                    client["client_qa_codes"] if client is not None else ()
+                ),
+            )
+        )
+    return records
+
+
+def _warning_groups(comparison: Comparison) -> list[dict[str, Any]]:
+    """Group repeated audit notices into readable result-page checks."""
+
+    grouped: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    for warning in dict.fromkeys(comparison.warnings):
+        match = _WARNING_PATTERN.match(warning)
+        code, message = (match.group(1), match.group(2)) if match else ("GENERAL", warning)
+        if code in {"RECORDING_PROTOCOL", "SAMPLE_RATE_RESAMPLED"}:
+            continue
+        group = grouped.setdefault(
+            code,
+            {
+                "code": code,
+                "title": _WARNING_TITLES.get(code, code.replace("_", " ").title()),
+                "messages": [],
+            },
+        )
+        if message not in group["messages"]:
+            group["messages"].append(message)
+    for group in grouped.values():
+        group["count"] = len(group["messages"])
+    return list(grouped.values())
 
 
 def _index_response(error: str | None = None, *, status: int = 200):
@@ -278,6 +602,10 @@ def create_app(
             )
         try:
             labels = _clean_labels(files, request.form.getlist("labels"))
+            parsed_capture = _parse_capture_metadata(
+                request.form.get("capture_metadata", ""),
+                expected_count=len(files),
+            )
         except ValueError as exc:
             return _index_response(str(exc), status=400)
 
@@ -285,12 +613,14 @@ def create_app(
         wav_paths: list[Path] = []
         try:
             wav_paths = _save_wavs(files, directory)
+            capture_records = _capture_records(wav_paths, parsed_capture)
             with _ANALYSIS_LOCK:
                 comparison = compare_takes(
                     wav_paths,
                     labels=labels,
                     text=text or None,
                     synthetic_demo=False,
+                    capture_metadata=capture_records,
                 )
                 image_path = render_comparison(comparison, directory / "prosodiff-card.png")
                 json_path = write_json_report(comparison, directory / "prosodiff-card.json")
@@ -326,7 +656,7 @@ def create_app(
             "result.html",
             record=record,
             labels=labels,
-            warnings=_deduplicated_warnings(record.comparison),
+            warning_groups=_warning_groups(record.comparison),
         )
 
     @app.get("/results/<run_id>/card.png")

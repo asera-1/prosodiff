@@ -330,13 +330,29 @@ def _figure(comparison: Comparison) -> Figure:
     for index, (take, values) in enumerate(
         zip(comparison.takes, pitch_series, strict=True)
     ):
+        # Probability controls emphasis only. Every finite Viterbi-decoded
+        # voiced estimate remains in the analysis and the pale contour.
         pitch_axis.plot(
             take.pitch_time_s,
             values,
             color=_COLORS[index],
-            linewidth=1.25,
+            linewidth=0.95,
             linestyle=_LINESTYLES[index],
+            alpha=0.28,
             label=f"T{index + 1} · {take.label}",
+        )
+        emphasized = np.where(
+            take.f0_probability
+            >= comparison.settings.voiced_probability_threshold,
+            values,
+            np.nan,
+        )
+        pitch_axis.plot(
+            take.pitch_time_s,
+            emphasized,
+            color=_COLORS[index],
+            linewidth=1.3,
+            linestyle=_LINESTYLES[index],
         )
     pitch_axis.axhline(0.0, color=_MUTED, linewidth=0.65, alpha=0.6)
     pitch_axis.set_xlim(0.0, max_duration)
@@ -353,13 +369,24 @@ def _figure(comparison: Comparison) -> Figure:
     pitch_axis.text(
         1.0,
         1.055,
-        "gaps = frames below pYIN confidence threshold",
+        f"pale = decoded voiced below p={comparison.settings.voiced_probability_threshold:.2f} · gaps = unvoiced or pause-excluded",
         transform=pitch_axis.transAxes,
         ha="right",
         fontsize=6.2,
         color=_MUTED,
     )
     _style_axis(pitch_axis)
+    if comparison.pooled_f0_hz is None:
+        pitch_axis.text(
+            0.5,
+            0.5,
+            "Pitch unavailable: too few decoded voiced frames",
+            transform=pitch_axis.transAxes,
+            ha="center",
+            va="center",
+            fontsize=7.0,
+            color=_MUTED,
+        )
 
     energy_axis = figure.add_subplot(grid[42:56, :], sharex=pitch_axis)
     energy_series = [
@@ -467,7 +494,7 @@ def _figure(comparison: Comparison) -> Figure:
     figure.text(
         0.075,
         0.058,
-        "F0: pYIN (p ≥ .80) · pitch span: IQR · pauses: nominal ≥150 ms (11.6 ms hop) · no time warping.",
+        f"F0: pYIN Viterbi voicing; pale < p {comparison.settings.voiced_probability_threshold:.2f} · pitch span: IQR · pauses: nominal ≥150 ms (11.6 ms hop) · no time warping.",
         fontsize=5.8,
         color=_MUTED,
     )

@@ -27,7 +27,7 @@ Start the private, loopback-only interface:
 uv run prosodiff ui
 ```
 
-Prosodiff opens a browser page where you can record two to four takes directly from the microphone, replay or redo each take, edit labels, and generate the same 4:5 card and JSON as the CLI. Allow microphone access when prompted. Selecting existing WAV files remains available as a secondary option.
+Prosodiff opens a browser page where you can record two to four takes directly from the microphone, replay or redo each take, edit labels, and generate the same 4:5 card and JSON as the CLI. Each take gets a nonblocking level/clipping check before analysis, and the page recommends a redo when the recorded level is below −35 dBFS, clipping is detected, the device changes, or a take differs from the reference by more than 6 dB. Allow microphone access when prompted. Selecting existing WAV files remains available as a secondary option.
 
 ![Prosodiff local browser interface](docs/prosodiff-ui.png)
 
@@ -81,7 +81,7 @@ The tool cannot verify these assumptions. It records them in the JSON and keeps 
 
 Prosodiff resamples analysis copies to 22.05 kHz but never peak-normalizes, denoises, pre-emphasizes, repairs pitch, or time-warps audio.
 
-- **Pitch:** `librosa.pyin`, 50–600 Hz by default, with frames retained only at voiced probability ≥0.80. Median F0 is compared on a take-balanced shared semitone reference. Pitch span is the IQR, reducing sensitivity to isolated extremes without silently deleting octave jumps.
+- **Pitch:** `librosa.pyin`, 50–600 Hz by default. F0 selection follows pYIN's Viterbi-decoded voiced flag inside the detected utterance and outside pauses; voiced probability is retained as a diagnostic and controls only pale/solid contour emphasis. Summaries require at least 20 decoded frames and 25% eligible-frame coverage. Median F0 is compared on a take-balanced shared semitone reference. Pitch span is the IQR, reducing sensitivity to isolated extremes without silently deleting octave jumps.
 - **Recorded energy:** time-domain RMS in dBFS. The absolute active-frame median is retained for between-take deltas; contour display is relative to the pooled take median. This is recorded level—not calibrated SPL, loudness, intensity, or vocal effort.
 - **Energy-defined pauses:** an adaptive RMS threshold followed by removal of sub-50 ms energy islands and filling of sub-150 ms gaps. Internal gaps use a nominal 150 ms cutoff with one-hop (11.6 ms) boundary quantization. The detector repeats at ±3 dB and warns when the result changes materially.
 - **Time:** contours use raw seconds from the detected utterance onset. They are explicitly not phonetic alignment. Normalized coordinates are stored in JSON only as a coarse linear-time view and must not be treated as phone correspondence.
@@ -90,11 +90,11 @@ All calculations are descriptive. A difference between two recordings is not evi
 
 ## JSON contract
 
-The machine-readable output uses schema `prosodiff.explicit-delivery-attribute-delta`, version `0.1.0`. It contains:
+The machine-readable output uses schema `prosodiff.explicit-delivery-attribute-delta`, version `0.2.0`. It contains:
 
 - fixed analysis parameters and assumptions;
 - input metadata, utterance spans, pitch/energy/pause attributes, and quality warnings;
-- auditable raw-time and normalized-time contours, with unavailable values encoded as JSON `null`;
+- auditable raw-time and normalized-time contours, including candidate F0, decoded voiced flags, eligibility masks, and probability diagnostics, with unavailable values encoded as JSON `null`;
 - all unordered input pairs in order, always identified as `b_minus_a`;
 - pair-level reliability fields and confound warnings.
 
@@ -102,7 +102,7 @@ The schema is intentionally multidimensional. There is no aggregate “expressiv
 
 ## Honest approximations
 
-- The live recorder requests disabled echo cancellation, noise suppression, and auto-gain, but the browser, operating system, or audio device may ignore those preferences; use the WAV upload route for tightly controlled recording chains.
+- The live recorder first requests disabled echo cancellation, noise suppression, and auto-gain as exact constraints, then falls back when a browser cannot satisfy them. Reported track settings and privacy-preserving capture provenance are stored in JSON, but the browser, operating system, or audio device can still omit or misreport settings; use the WAV upload route for tightly controlled recording chains.
 - pYIN probabilities are an engineering confidence signal, not calibrated certainty; tracker errors can remain.
 - Energy measurements are dominated by recording chain changes if the protocol is not controlled.
 - Energy-defined gaps are not syntactic, pragmatic, or linguistic pause labels.

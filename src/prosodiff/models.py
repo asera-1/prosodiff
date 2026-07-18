@@ -25,6 +25,60 @@ def _float_array(values: FloatArray) -> list[float | None]:
 
 
 @dataclass(frozen=True)
+class CaptureMetadata:
+    """Privacy-preserving browser capture provenance reported by the local UI."""
+
+    source: str
+    client_reported: bool = False
+    encoded_sample_rate_hz: int | None = None
+    encoded_channels: int | None = None
+    encoded_duration_s: float | None = None
+    track_sample_rate_hz: int | None = None
+    track_channel_count: int | None = None
+    track_sample_size_bits: int | None = None
+    track_latency_s: float | None = None
+    echo_cancellation: bool | None = None
+    noise_suppression: bool | None = None
+    auto_gain_control: bool | None = None
+    same_device_as_reference: bool | None = None
+    constraints_fallback: bool = False
+    client_active_rms_dbfs: float | None = None
+    client_peak_dbfs: float | None = None
+    client_clipped_fraction: float | None = None
+    client_qa_codes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return capture provenance without browser device identifiers."""
+
+        return {
+            "source": self.source,
+            "client_reported": self.client_reported,
+            "encoded_wav": {
+                "sample_rate_hz": self.encoded_sample_rate_hz,
+                "channels": self.encoded_channels,
+                "duration_s": _rounded(self.encoded_duration_s),
+            },
+            "track_settings": {
+                "sample_rate_hz": self.track_sample_rate_hz,
+                "channel_count": self.track_channel_count,
+                "sample_size_bits": self.track_sample_size_bits,
+                "latency_s": _rounded(self.track_latency_s),
+                "echo_cancellation": self.echo_cancellation,
+                "noise_suppression": self.noise_suppression,
+                "auto_gain_control": self.auto_gain_control,
+                "same_device_as_reference": self.same_device_as_reference,
+            },
+            "constraints_fallback": self.constraints_fallback,
+            "client_qa": {
+                "active_rms_estimate_dbfs": _rounded(self.client_active_rms_dbfs),
+                "peak_dbfs": _rounded(self.client_peak_dbfs),
+                "clipped_sample_fraction": _rounded(self.client_clipped_fraction),
+                "codes": list(self.client_qa_codes),
+            },
+        }
+
+
+@dataclass(frozen=True)
 class AnalysisSettings:
     """Fixed numerical settings recorded with every result."""
 
@@ -71,8 +125,12 @@ class TakeMetrics:
     pause_fraction_threshold_plus_3db: float
     pitch_eligible_frames: int
     pitch_valid_frames: int
+    pitch_high_probability_frames: int
     f0_coverage: float
+    high_probability_fraction: float
     voiced_probability_median: float | None
+    voiced_probability_p10: float | None
+    voiced_probability_p90: float | None
     f0_median_hz: float | None
     f0_iqr_st: float | None
     active_rms_median_dbfs: float
@@ -94,11 +152,15 @@ class TakeAnalysis:
     pitch_time_s: FloatArray
     pitch_time_norm: FloatArray
     f0_hz: FloatArray
+    f0_candidate_hz: FloatArray
+    f0_voiced_flag: BoolArray
+    pitch_eligible_mask: BoolArray
     f0_probability: FloatArray
     energy_time_s: FloatArray
     energy_time_norm: FloatArray
     rms_dbfs: FloatArray
     pause_mask: BoolArray
+    capture_metadata: CaptureMetadata | None = None
     warnings: list[str] = field(default_factory=list)
 
     def to_dict(
@@ -132,6 +194,11 @@ class TakeAnalysis:
                 "file_duration_s": _rounded(metrics.file_duration_s),
                 "peak_abs": _rounded(metrics.peak_abs),
                 "clipped_sample_fraction": _rounded(metrics.clipping_fraction),
+                "capture": (
+                    self.capture_metadata.to_dict()
+                    if self.capture_metadata is not None
+                    else None
+                ),
             },
             "utterance": {
                 "start_s": _rounded(metrics.utterance_start_s),
@@ -154,12 +221,22 @@ class TakeAnalysis:
                 ),
             },
             "pitch": {
+                "selection_method": "pyin_viterbi_voiced_flag",
                 "eligible_frames": metrics.pitch_eligible_frames,
                 "valid_frames": metrics.pitch_valid_frames,
+                "decoded_voiced_frames": metrics.pitch_valid_frames,
                 "coverage": _rounded(metrics.f0_coverage),
+                "decoded_voiced_coverage": _rounded(metrics.f0_coverage),
+                "high_probability_frames": metrics.pitch_high_probability_frames,
+                "high_probability_fraction": _rounded(
+                    metrics.high_probability_fraction
+                ),
                 "voiced_probability_median": _rounded(
                     metrics.voiced_probability_median
                 ),
+                "voiced_probability_p10": _rounded(metrics.voiced_probability_p10),
+                "voiced_probability_p90": _rounded(metrics.voiced_probability_p90),
+                "summary_available": metrics.f0_median_hz is not None,
                 "f0_median_hz": _rounded(metrics.f0_median_hz),
                 "f0_median_st_rel": _rounded(median_st_rel),
                 "f0_iqr_st": _rounded(metrics.f0_iqr_st),
@@ -178,6 +255,11 @@ class TakeAnalysis:
                 "pitch_time_s": _float_array(self.pitch_time_s),
                 "pitch_time_norm": _float_array(self.pitch_time_norm),
                 "f0_hz": _float_array(self.f0_hz),
+                "pyin_candidate_f0_hz": _float_array(self.f0_candidate_hz),
+                "pyin_voiced_flag": [bool(value) for value in self.f0_voiced_flag],
+                "pitch_eligible_mask": [
+                    bool(value) for value in self.pitch_eligible_mask
+                ],
                 "f0_st_rel": _float_array(f0_st_rel),
                 "voiced_probability": _float_array(self.f0_probability),
                 "energy_time_s": _float_array(self.energy_time_s),
@@ -259,7 +341,7 @@ class Comparison:
 
         return {
             "schema": "prosodiff.explicit-delivery-attribute-delta",
-            "schema_version": "0.1.0",
+            "schema_version": "0.2.0",
             "tool_version": version,
             "synthetic_demo": self.synthetic_demo,
             "text": self.text,
@@ -275,8 +357,16 @@ class Comparison:
                     "hop_length": self.settings.hop_length,
                     "fmin_hz": self.settings.fmin_hz,
                     "fmax_hz": self.settings.fmax_hz,
-                    "voicing_probability_minimum": (
+                    "frame_selection": "eligible_and_pyin_viterbi_voiced",
+                    "voiced_probability_role": "diagnostic_only",
+                    "voiced_probability_diagnostic_threshold": (
                         self.settings.voiced_probability_threshold
+                    ),
+                    "minimum_frames_for_summary": (
+                        self.settings.minimum_pitch_frames
+                    ),
+                    "minimum_coverage_for_summary": (
+                        self.settings.minimum_pitch_coverage
                     ),
                     "shared_reference_hz": _rounded(self.pooled_f0_hz),
                 },

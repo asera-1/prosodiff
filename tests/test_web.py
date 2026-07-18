@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -51,6 +52,39 @@ def _comparison() -> SimpleNamespace:
     )
 
 
+def _live_capture_metadata(count: int = 2) -> str:
+    takes = []
+    for index in range(count):
+        takes.append(
+            {
+                "source": "live",
+                "wav": {
+                    "sample_rate_hz": 48_000,
+                    "channels": 1,
+                    "duration_s": 2.0,
+                },
+                "track": {
+                    "sample_rate_hz": 48_000,
+                    "channel_count": 1,
+                    "sample_size_bits": 16,
+                    "latency_s": 0.01,
+                    "echo_cancellation": False,
+                    "noise_suppression": False,
+                    "auto_gain_control": False,
+                    "same_device_as_reference": True,
+                },
+                "constraints_fallback": False,
+                "client_qa": {
+                    "active_rms_estimate_dbfs": -24.0 - index,
+                    "peak_dbfs": -4.0,
+                    "clipped_sample_fraction": 0.0,
+                    "codes": [],
+                },
+            }
+        )
+    return json.dumps({"schema_version": "0.1.0", "takes": takes})
+
+
 def _mock_pipeline(monkeypatch) -> None:
     comparison = _comparison()
 
@@ -82,6 +116,7 @@ def test_index_is_accessible_and_hardened(tmp_path: Path) -> None:
     assert b'name="csrf_token" value="test-token"' in response.data
     assert b'id="comparison-form"' in response.data
     assert b'id="record-button"' in response.data
+    assert b'id="capture-metadata"' in response.data
     assert b"Record matched takes" in response.data
     assert b"Use existing WAV files instead" in response.data
     assert response.headers["Cache-Control"] == "no-store"
@@ -162,6 +197,8 @@ def test_success_keeps_only_outputs_and_supports_downloads(tmp_path: Path, monke
     assert result.status_code == 200
     assert b"Comparison ready" in result.data
     assert b"Synthetic route fixture" in result.data
+    assert b"Analysis checks" in result.data
+    assert b"TEST_NOTICE" in result.data
 
     run_id = response.headers["Location"].rsplit("/", 1)[-1]
     image = client.get(f"/results/{run_id}/download/card.png")
@@ -211,6 +248,87 @@ def test_result_escapes_labels(tmp_path: Path, monkeypatch) -> None:
 def test_unknown_result_is_not_found(tmp_path: Path) -> None:
     app = _app(tmp_path)
     assert app.test_client().get("/results/not-a-run").status_code == 404
+
+
+def test_live_capture_metadata_is_validated_and_passed_to_analysis(
+    tmp_path: Path, monkeypatch
+) -> None:
+    comparison = _comparison()
+    captured = {}
+
+    def fake_compare(*args, **kwargs):
+        captured.update(kwargs)
+        return comparison
+
+    monkeypatch.setattr("prosodiff.web.compare_takes", fake_compare)
+
+    def fake_render(_comparison, path: Path) -> Path:
+        path.write_bytes(b"png")
+        return path
+
+    def fake_report(_comparison, path: Path) -> Path:
+        path.write_text("{}", encoding="utf-8")
+        return path
+
+    monkeypatch.setattr("prosodiff.web.render_comparison", fake_render)
+    monkeypatch.setattr("prosodiff.web.write_json_report", fake_report)
+    response = _app(tmp_path).test_client().post(
+        "/compare",
+        data={
+            "csrf_token": "test-token",
+            "protocol_ack": "yes",
+            "labels": ["Reference", "Delivery"],
+            "capture_metadata": _live_capture_metadata(),
+            "wavs": [_wav_upload("one.wav"), _wav_upload("two.wav")],
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 303
+    metadata = captured["capture_metadata"]
+    assert len(metadata) == 2
+    assert metadata[0].source == "live"
+    assert metadata[0].echo_cancellation is False
+    assert metadata[0].encoded_sample_rate_hz == 16_000
+    assert metadata[0].encoded_duration_s == 0.25
+    serialized = json.dumps(metadata[0].to_dict()).casefold()
+    assert "device_id" not in serialized
+    assert "group_id" not in serialized
+
+
+def test_capture_metadata_rejects_bad_json_count_and_nonfinite_numbers(
+    tmp_path: Path,
+) -> None:
+    client = _app(tmp_path).test_client()
+    common = {
+        "csrf_token": "test-token",
+        "protocol_ack": "yes",
+        "labels": ["Reference", "Delivery"],
+    }
+    wrong_count = client.post(
+        "/compare",
+        data={
+            **common,
+            "capture_metadata": _live_capture_metadata(1),
+            "wavs": [_wav_upload("one.wav"), _wav_upload("two.wav")],
+        },
+        content_type="multipart/form-data",
+    )
+    assert wrong_count.status_code == 400
+    assert b"must match" in wrong_count.data
+
+    bad_number = _live_capture_metadata().replace("-24.0", "NaN", 1)
+    nonfinite = client.post(
+        "/compare",
+        data={
+            **common,
+            "capture_metadata": bad_number,
+            "wavs": [_wav_upload("one.wav"), _wav_upload("two.wav")],
+        },
+        content_type="multipart/form-data",
+    )
+    assert nonfinite.status_code == 400
+    assert b"Capture metadata is invalid" in nonfinite.data
 
 
 def test_request_size_limit(tmp_path: Path) -> None:

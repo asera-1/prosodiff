@@ -8,9 +8,9 @@ import pytest
 import soundfile as sf
 
 from prosodiff import __version__
-from prosodiff.analysis import _valid_pitch_mask, compare_takes
+from prosodiff.analysis import _valid_pitch_mask, analyse_take, compare_takes
 from prosodiff.errors import AudioInputError
-from prosodiff.models import Comparison
+from prosodiff.models import AnalysisSettings, Comparison
 
 
 def _pair(comparison: Comparison, a: str, b: str):
@@ -50,7 +50,7 @@ def test_recovers_duration_and_internal_pause(four_take_comparison: Comparison) 
     assert pair.pause_fraction_percentage_points > 4.0
 
 
-def test_confidence_mask_is_explicit() -> None:
+def test_decoded_voicing_selection_does_not_delete_low_probability_f0() -> None:
     f0 = np.asarray([100.0, 101.0, np.nan, 102.0])
     flags = np.asarray([True, True, True, True])
     probabilities = np.asarray([0.90, 0.40, 0.99, 0.80])
@@ -62,7 +62,35 @@ def test_confidence_mask_is_explicit() -> None:
         eligible,
         threshold=0.80,
     )
-    assert mask.tolist() == [True, False, False, True]
+    assert mask.tolist() == [True, True, False, True]
+
+
+def test_low_probability_decoded_frames_still_produce_pitch_summary(
+    synthetic_wavs: list[Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def low_probability_pyin(audio: np.ndarray, **kwargs):
+        frame_count = 1 + (
+            audio.size - kwargs["frame_length"]
+        ) // kwargs["hop_length"]
+        return (
+            np.full(frame_count, 180.0),
+            np.ones(frame_count, dtype=bool),
+            np.full(frame_count, 0.40),
+        )
+
+    monkeypatch.setattr("prosodiff.analysis.librosa.pyin", low_probability_pyin)
+    take = analyse_take(
+        synthetic_wavs[0],
+        take_id="take_1",
+        label="Natural delivery",
+        settings=AnalysisSettings(),
+    )
+
+    assert take.metrics.f0_median_hz == pytest.approx(180.0)
+    assert take.metrics.pitch_valid_frames >= 20
+    assert take.metrics.pitch_high_probability_frames == 0
+    assert take.metrics.high_probability_fraction == 0.0
+    assert not any("PITCH_LOW_COVERAGE" in warning for warning in take.warnings)
 
 
 def test_json_schema_is_standard_and_auditable(
@@ -72,12 +100,34 @@ def test_json_schema_is_standard_and_auditable(
     encoded = json.dumps(payload, allow_nan=False)
     assert "NaN" not in encoded
     assert payload["schema"] == "prosodiff.explicit-delivery-attribute-delta"
-    assert payload["schema_version"] == "0.1.0"
+    assert payload["schema_version"] == "0.2.0"
+    assert payload["analysis"]["pitch"]["voiced_probability_role"] == "diagnostic_only"
     assert len(payload["takes"]) == 4
     assert len(payload["pairs"]) == 6
     assert payload["pairs"][0]["direction"] == "b_minus_a"
     assert payload["takes"][0]["path"] == "take_1.wav"
     for take in payload["takes"]:
+        pitch = take["pitch"]
+        contours = take["contours"]
+        assert pitch["selection_method"] == "pyin_viterbi_voiced_flag"
+        assert pitch["valid_frames"] == sum(
+            value is not None for value in contours["f0_hz"]
+        )
+        pitch_lengths = {
+            len(contours[key])
+            for key in (
+                "pitch_time_s",
+                "pitch_time_norm",
+                "f0_hz",
+                "pyin_candidate_f0_hz",
+                "pyin_voiced_flag",
+                "pitch_eligible_mask",
+                "voiced_probability",
+            )
+        }
+        assert pitch_lengths == {len(contours["pitch_time_s"])}
+        assert all(isinstance(value, bool) for value in contours["pyin_voiced_flag"])
+        assert all(isinstance(value, bool) for value in contours["pitch_eligible_mask"])
         assert min(take["contours"]["pitch_time_norm"]) >= 0.0
         assert max(take["contours"]["pitch_time_norm"]) <= 1.0
         assert min(take["contours"]["energy_time_norm"]) >= 0.0

@@ -11,6 +11,7 @@
   <div class="workspace">
     <form id="comparison-form" class="control-panel" action="{{ url_for('compare') }}" method="post" enctype="multipart/form-data" novalidate>
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input id="capture-metadata" type="hidden" name="capture_metadata" value="">
       {% if error %}
       <div class="error-summary" role="alert">
         <strong>Check the comparison</strong>
@@ -52,7 +53,7 @@
             <span>Stop and save</span>
           </button>
         </div>
-        <small>Maximum 30 seconds. Browser processing is requested off, but not guaranteed.</small>
+        <small>Maximum 30 seconds. Processing is requested off; actual browser settings and a level check are recorded per take.</small>
       </section>
 
       <fieldset id="recorded-takes" class="recorded-takes" hidden>
@@ -128,7 +129,7 @@
         </div>
       </div>
       <div class="method-strip">
-        <span><b>Pitch</b> pYIN confidence mask</span>
+        <span><b>Pitch</b> pYIN decoded voicing</span>
         <span><b>Energy</b> recorded RMS</span>
         <span><b>Pauses</b> ±3 dB sensitivity</span>
       </div>

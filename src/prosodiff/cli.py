@@ -117,7 +117,7 @@ def compare(
             "--voicing-threshold",
             min=0.0,
             max=1.0,
-            help="Minimum pYIN voiced probability.",
+            help="pYIN probability threshold used only to emphasize contour confidence.",
         ),
     ] = 0.80,
 ) -> None:

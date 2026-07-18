@@ -14,6 +14,7 @@ import soundfile as sf
 from prosodiff.errors import AudioInputError
 from prosodiff.models import (
     AnalysisSettings,
+    CaptureMetadata,
     Comparison,
     DeliveryDelta,
     TakeAnalysis,
@@ -224,10 +225,25 @@ def _valid_pitch_mask(
     *,
     threshold: float,
 ) -> np.ndarray:
-    """Apply the explicit pYIN confidence contract without repairing frames."""
+    """Select finite F0 frames decoded as voiced, independent of probability."""
 
-    return (
-        eligible & voiced_flag & np.isfinite(f0_hz) & (voiced_probability >= threshold)
+    # Retain the legacy arguments so downstream callers do not break.  pYIN's
+    # Viterbi-decoded voiced flag is the frame-selection decision; probability
+    # and its threshold are diagnostics only.
+    del voiced_probability, threshold
+    return eligible & voiced_flag & np.isfinite(f0_hz)
+
+
+def _high_probability_pitch_mask(
+    selected_pitch: np.ndarray,
+    voiced_probability: np.ndarray,
+    *,
+    threshold: float,
+) -> np.ndarray:
+    """Identify selected frames meeting the probability diagnostic threshold."""
+
+    return selected_pitch & np.isfinite(voiced_probability) & (
+        voiced_probability >= threshold
     )
 
 
@@ -237,6 +253,7 @@ def analyse_take(
     take_id: str,
     label: str,
     settings: AnalysisSettings,
+    capture_metadata: CaptureMetadata | None = None,
 ) -> TakeAnalysis:
     """Analyse one WAV without normalizing, denoising, or repairing pitch."""
 
@@ -245,7 +262,7 @@ def analyse_take(
         raise AudioInputError(f"Audio file does not exist: {path}")
     if path.suffix.lower() != ".wav":
         raise AudioInputError(
-            f"Prosodiff v0.1 accepts WAV files only, received: {path.name}"
+            f"Prosodiff v0.2 accepts WAV files only, received: {path.name}"
         )
 
     try:
@@ -274,13 +291,47 @@ def analyse_take(
         )
     if file_duration_s > _MAXIMUM_RECOMMENDED_DURATION_S:
         raise AudioInputError(
-            f"{path.name} is {file_duration_s:.1f} s; v0.1 is limited to short utterances under "
+            f"{path.name} is {file_duration_s:.1f} s; v0.2 is limited to short utterances under "
             f"{_MAXIMUM_RECOMMENDED_DURATION_S:.0f} s."
         )
 
     original_channels = int(samples.shape[1])
     audio = np.mean(samples, axis=1)
     warnings: list[str] = []
+    if capture_metadata is not None and capture_metadata.source == "live":
+        processing = (
+            capture_metadata.echo_cancellation,
+            capture_metadata.noise_suppression,
+            capture_metadata.auto_gain_control,
+        )
+        if any(value is True for value in processing):
+            warnings.append(
+                _warning(
+                    "CAPTURE_PROCESSING_ACTIVE",
+                    f"{label}: the browser reports active microphone processing; energy may be confounded.",
+                )
+            )
+        if any(value is None for value in processing):
+            warnings.append(
+                _warning(
+                    "CAPTURE_SETTINGS_UNKNOWN",
+                    f"{label}: the browser did not report every microphone-processing setting.",
+                )
+            )
+        if capture_metadata.same_device_as_reference is False:
+            warnings.append(
+                _warning(
+                    "CAPTURE_DEVICE_CHANGED",
+                    f"{label}: the browser reports a different input device from the reference take.",
+                )
+            )
+        if capture_metadata.constraints_fallback:
+            warnings.append(
+                _warning(
+                    "CAPTURE_CONSTRAINTS_FALLBACK",
+                    f"{label}: the browser retried capture without exact processing constraints.",
+                )
+            )
     if original_channels > 1:
         warnings.append(
             _warning(
@@ -311,13 +362,6 @@ def analyse_take(
             orig_sr=original_sample_rate,
             target_sr=settings.sample_rate_hz,
             res_type="polyphase",
-        )
-        warnings.append(
-            _warning(
-                "SAMPLE_RATE_RESAMPLED",
-                f"{label}: {original_sample_rate} Hz was resampled to "
-                f"{settings.sample_rate_hz} Hz.",
-            )
         )
 
     rms = librosa.feature.rms(
@@ -394,7 +438,7 @@ def analyse_take(
 
     pitch_times_s: np.ndarray
     try:
-        f0_hz, voiced_flag, voiced_probability = librosa.pyin(
+        candidate_f0_hz, voiced_flag, voiced_probability = librosa.pyin(
             audio,
             fmin=settings.fmin_hz,
             fmax=min(settings.fmax_hz, settings.sample_rate_hz / 2.0 - 1.0),
@@ -403,13 +447,13 @@ def analyse_take(
             hop_length=settings.hop_length,
             resolution=0.1,
             center=False,
-            fill_na=np.nan,
+            fill_na=None,
         )
     except Exception as exc:
         raise AudioInputError(f"Pitch analysis failed for {path.name}: {exc}") from exc
 
     pitch_times_s = (
-        np.arange(f0_hz.size, dtype=float) * settings.hop_length
+        np.arange(candidate_f0_hz.size, dtype=float) * settings.hop_length
         + settings.pitch_frame_length / 2.0
     ) / settings.sample_rate_hz
     eligible_pitch = (
@@ -418,38 +462,61 @@ def analyse_take(
         & (~_inside_pause(pitch_times_s, energy_times_s, pauses.pause_mask))
     )
     valid_pitch = _valid_pitch_mask(
-        f0_hz,
+        candidate_f0_hz,
         voiced_flag,
         voiced_probability,
         eligible_pitch,
         threshold=settings.voiced_probability_threshold,
     )
-    f0_hz = np.where(valid_pitch, f0_hz, np.nan).astype(np.float64)
+    high_probability_pitch = _high_probability_pitch_mask(
+        valid_pitch,
+        voiced_probability,
+        threshold=settings.voiced_probability_threshold,
+    )
+    candidate_f0_hz = candidate_f0_hz.astype(np.float64)
+    voiced_flag = voiced_flag.astype(bool)
+    f0_hz = np.where(valid_pitch, candidate_f0_hz, np.nan).astype(np.float64)
     voiced_probability = voiced_probability.astype(np.float64)
     eligible_count = int(np.sum(eligible_pitch))
     valid_count = int(np.sum(valid_pitch))
+    high_probability_count = int(np.sum(high_probability_pitch))
     f0_coverage = valid_count / eligible_count if eligible_count else 0.0
+    high_probability_fraction = (
+        high_probability_count / valid_count if valid_count else 0.0
+    )
     reliable_pitch = (
         valid_count >= settings.minimum_pitch_frames
         and f0_coverage >= settings.minimum_pitch_coverage
     )
     valid_f0 = f0_hz[np.isfinite(f0_hz)]
+    selected_probabilities = voiced_probability[
+        valid_pitch & np.isfinite(voiced_probability)
+    ]
+    voiced_probability_median = (
+        float(np.median(selected_probabilities))
+        if selected_probabilities.size
+        else None
+    )
+    voiced_probability_p10 = (
+        float(np.percentile(selected_probabilities, 10))
+        if selected_probabilities.size
+        else None
+    )
+    voiced_probability_p90 = (
+        float(np.percentile(selected_probabilities, 90))
+        if selected_probabilities.size
+        else None
+    )
     if reliable_pitch:
         f0_median_hz: float | None = float(np.median(valid_f0))
         f0_iqr_st: float | None = _pitch_iqr_semitones(valid_f0)
-        voiced_probability_median: float | None = float(
-            np.median(voiced_probability[valid_pitch])
-        )
     else:
         f0_median_hz = None
         f0_iqr_st = None
-        voiced_probability_median = (
-            float(np.median(voiced_probability[valid_pitch])) if valid_count else None
-        )
         warnings.append(
             _warning(
                 "PITCH_LOW_COVERAGE",
-                f"{label}: {valid_count} pitch frames passed the confidence mask "
+                f"{label}: {valid_count} frames were decoded as voiced outside pauses "
                 f"({f0_coverage:.0%} coverage); pitch summaries are unavailable.",
             )
         )
@@ -529,6 +596,9 @@ def analyse_take(
     pitch_time_relative = (pitch_times_s - pauses.start_s)[pitch_inside]
     pitch_time_norm = pitch_time_norm[pitch_inside]
     f0_hz = f0_hz[pitch_inside]
+    candidate_f0_hz = candidate_f0_hz[pitch_inside]
+    voiced_flag = voiced_flag[pitch_inside]
+    eligible_pitch = eligible_pitch[pitch_inside]
     voiced_probability = voiced_probability[pitch_inside]
     energy_time_relative = (energy_times_s - pauses.start_s)[energy_norm_inside]
     energy_time_norm = energy_time_norm[energy_norm_inside]
@@ -555,8 +625,12 @@ def analyse_take(
         pause_fraction_threshold_plus_3db=pauses_plus.pause_fraction,
         pitch_eligible_frames=eligible_count,
         pitch_valid_frames=valid_count,
+        pitch_high_probability_frames=high_probability_count,
         f0_coverage=f0_coverage,
+        high_probability_fraction=high_probability_fraction,
         voiced_probability_median=voiced_probability_median,
+        voiced_probability_p10=voiced_probability_p10,
+        voiced_probability_p90=voiced_probability_p90,
         f0_median_hz=f0_median_hz,
         f0_iqr_st=f0_iqr_st,
         active_rms_median_dbfs=active_rms_median_dbfs,
@@ -574,11 +648,15 @@ def analyse_take(
         pitch_time_s=pitch_time_relative.astype(np.float64),
         pitch_time_norm=pitch_time_norm.astype(np.float64),
         f0_hz=f0_hz,
+        f0_candidate_hz=candidate_f0_hz,
+        f0_voiced_flag=voiced_flag,
+        pitch_eligible_mask=eligible_pitch,
         f0_probability=voiced_probability,
         energy_time_s=energy_time_relative.astype(np.float64),
         energy_time_norm=energy_time_norm.astype(np.float64),
         rms_dbfs=rms_dbfs,
         pause_mask=pause_mask,
+        capture_metadata=capture_metadata,
         warnings=warnings,
     )
 
@@ -650,6 +728,7 @@ def compare_takes(
     text: str | None = None,
     settings: AnalysisSettings | None = None,
     synthetic_demo: bool = False,
+    capture_metadata: Iterable[CaptureMetadata | None] | None = None,
 ) -> Comparison:
     """Analyse two to four recordings and compare every unordered pair."""
 
@@ -676,15 +755,23 @@ def compare_takes(
         raise AudioInputError("Take labels must be unique.")
 
     resolved_settings = settings or AnalysisSettings()
+    capture_list = list(capture_metadata) if capture_metadata is not None else []
+    if capture_list and len(capture_list) != len(path_list):
+        raise AudioInputError(
+            f"Received capture metadata for {len(capture_list)} of {len(path_list)} recordings."
+        )
+    if not capture_list:
+        capture_list = [None] * len(path_list)
     takes = [
         analyse_take(
             path,
             take_id=f"take_{index}",
             label=label,
             settings=resolved_settings,
+            capture_metadata=capture,
         )
-        for index, (path, label) in enumerate(
-            zip(path_list, label_list, strict=True), start=1
+        for index, (path, label, capture) in enumerate(
+            zip(path_list, label_list, capture_list, strict=True), start=1
         )
     ]
 

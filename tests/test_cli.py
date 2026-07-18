@@ -26,3 +26,10 @@ def test_ui_help_does_not_start_server() -> None:
     assert result.exit_code == 0
     assert "local browser interface" in result.output
     assert "--no-open-browser" in result.output
+
+
+def test_voicing_threshold_help_is_diagnostic_only() -> None:
+    result = runner.invoke(app, ["compare", "--help"])
+    assert result.exit_code == 0
+    assert "threshold used only to" in result.output
+    assert "emphasize contour" in result.output
