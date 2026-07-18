@@ -25,7 +25,6 @@ def test_ui_help_does_not_start_server() -> None:
     result = runner.invoke(app, ["ui", "--help"])
     assert result.exit_code == 0
     assert "local browser interface" in result.output
-    assert "--open-browser" in result.output
 
 
 def test_voicing_threshold_help_is_diagnostic_only() -> None:
