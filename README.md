@@ -1,146 +1,199 @@
 # Prosodiff
 
-[![tests](https://github.com/asera-1/prosodiff/actions/workflows/tests.yml/badge.svg)](https://github.com/asera-1/prosodiff/actions/workflows/tests.yml)
+[![PyPI](https://img.shields.io/pypi/v/prosodiff?label=PyPI)](https://pypi.org/project/prosodiff/)
+[![Python](https://img.shields.io/pypi/pyversions/prosodiff)](https://pypi.org/project/prosodiff/)
+[![Tests](https://github.com/asera-1/prosodiff/actions/workflows/tests.yml/badge.svg)](https://github.com/asera-1/prosodiff/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/asera-1/prosodiff/blob/main/LICENSE)
 
-**Same words. Different delivery—made visible.**
+**Same words. Different delivery—made measurable.**
 
-Prosodiff is a small, training-free CLI for comparing two to four recordings of the same speaker saying the same text in different ways. It exports a publication-grade 4:5 figure and a versioned JSON record of explicit delivery-attribute deltas—without predicting emotions or collapsing the comparison into a single score.
+Prosodiff is a training-free CLI and loopback-only browser interface for comparing
+two to four recordings of the same speaker saying the same text. It exports a 4:5
+PNG, SVG, or PDF report plus versioned JSON containing per-take measures, explicit
+pairwise deltas, contours, and reliability diagnostics.
 
-![Prosodiff synthetic demonstration](https://raw.githubusercontent.com/asera-1/prosodiff/main/docs/prosodiff-card.png)
+> Prosodiff describes recorded acoustic differences. It does not infer emotion,
+> linguistic boundaries, listener response, or an overall expressivity score.
 
 Built as a side tool for retrieval-augmented expressive TTS research (ProsodyRAG) at Universität Osnabrück.
 
-Try the complete no-audio demonstration without cloning or installing:
+![Prosodiff social preview](https://raw.githubusercontent.com/asera-1/prosodiff/main/docs/prosodiff-social-preview.png)
+
+## Quick start
+
+Run the complete synthetic demonstration without cloning or a persistent install:
 
 ```bash
 uvx prosodiff demo --output prosodiff-card.png
 ```
 
-Or install the command permanently:
+This creates `prosodiff-card.png` and `prosodiff-card.json`; no audio is required.
+The first run may take one to two minutes while the scientific Python stack builds
+local caches.
+
+For a permanent installation:
 
 ```bash
 pip install prosodiff
 ```
 
-## What it reports
+Prosodiff requires Python 3.10 or newer.
 
-- utterance duration;
-- median F0 and robust pitch span (interquartile range in semitones);
-- recorded RMS level and within-take energy dynamics;
-- energy-defined internal pause count, time, and share;
-- pYIN coverage, clipping, level, pitch-boundary, and pause-sensitivity warnings;
-- every unordered pair as an explicit **B − A** attribute delta.
+## Example report
 
-Prosodiff does **not** infer emotion, speaking rate, linguistic boundaries, listener response, naturalness, vocal effort, or an overall prosody score.
+![Prosodiff synthetic demonstration](https://raw.githubusercontent.com/asera-1/prosodiff/main/docs/prosodiff-card.png)
 
-## Local browser interface
+The example is generated from deterministic synthetic signals. No recordings or
+research datasets are committed. Its machine-readable output is available as
+[`docs/prosodiff-card.json`](https://github.com/asera-1/prosodiff/blob/main/docs/prosodiff-card.json).
 
-Start the private, loopback-only interface:
+## What Prosodiff measures
 
-```bash
-uv run prosodiff ui
-```
+| Dimension | Reported as | Interpretation boundary |
+| --- | --- | --- |
+| Duration | Seconds and pairwise percentage deltas | Not speaking rate; text and trimming are not verified |
+| Pitch | Median F0 and IQR span in semitones | Unavailable when reliable pYIN coverage is insufficient |
+| Recorded energy | Active RMS level in dBFS and within-take dynamics | Sensitive to microphone, gain, distance, and AGC |
+| Pauses | Internal gap count, duration, and share | Energy-defined gaps, not linguistic pause labels |
 
-Prosodiff opens a browser page where you can record two to four takes directly from the microphone, replay or redo each take, edit labels, and generate the same 4:5 card and JSON as the CLI. Each take gets a nonblocking level/clipping check before analysis, and the page recommends a redo when the recorded level is below −35 dBFS, clipping is detected, the device changes, or a take differs from the reference by more than 6 dB. Allow microphone access when prompted. Selecting existing WAV files remains available as a secondary option.
+Every unordered pair is reported explicitly as **B − A**. The report also surfaces
+pitch coverage, clipping, recorded-level, pitch-boundary, duration-mismatch, and
+pause-sensitivity notices instead of silently hiding unreliable measurements.
 
-![Prosodiff local browser interface](https://raw.githubusercontent.com/asera-1/prosodiff/main/docs/prosodiff-ui.png)
-
-The server binds only to `127.0.0.1`; it has no telemetry, CDN assets, or external API calls. Live captures are encoded as mono PCM WAVs in the browser. Recordings use random temporary filenames on the server and are deleted immediately after the analysis succeeds or fails. Generated PNG/JSON results are deleted when the server stops. Do not modify the code to expose this development interface on `0.0.0.0` or deploy it publicly.
-
-If a browser does not open automatically, copy the local URL printed in the terminal. Use `uv run prosodiff ui --no-open-browser --port 7860` when you want a fixed port.
-
-## Fresh-clone quickstart
-
-Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).
-
-Install in one command:
-
-```bash
-uv sync --extra dev
-```
-
-Generate the complete synthetic demonstration in one command:
-
-```bash
-uv run prosodiff demo --output docs/prosodiff-card.png
-```
-
-The command creates `docs/prosodiff-card.png` and `docs/prosodiff-card.json`. No real audio is committed; the demo signals are deterministic synthetic fixtures and are labelled accordingly in the figure and JSON.
-
-The first run can take roughly one to two minutes while librosa/Numba and Matplotlib build local caches; subsequent short-utterance runs are faster.
-
-## Exact usage example
+## Compare recordings
 
 Record the same sentence back-to-back, then run:
 
 ```bash
-uv run prosodiff compare calm.wav encouraging.wav --label Calm --label Encouraging --text "Heute schaffen wir das gemeinsam." --output prosodiff-card.png
+prosodiff compare calm.wav encouraging.wav \
+  --label Calm \
+  --label Encouraging \
+  --text "Heute schaffen wir das gemeinsam." \
+  --output prosodiff-card.png
 ```
 
-This writes `prosodiff-card.png` plus the adjacent `prosodiff-card.json` explicit delivery-attribute delta schema. Pass two, three, or four WAV files; repeat `--label` once per file.
+Pass two, three, or four WAV files and repeat `--label` once per file. The first
+take is the delta reference. By default, Prosodiff writes the JSON report beside
+the figure with the same filename stem. Run `prosodiff compare --help` for pitch
+bounds, confidence-display settings, and a custom JSON output path.
+
+## Record live locally
+
+Start the browser interface after installation:
+
+```bash
+prosodiff ui
+```
+
+Live recording is the primary path: record, replay, redo, and label two to four
+takes before generating the same figure and JSON as the CLI. Existing WAV upload
+remains available as a secondary option.
+
+![Prosodiff local browser interface](https://raw.githubusercontent.com/asera-1/prosodiff/main/docs/prosodiff-ui.png)
+
+The interface:
+
+- binds only to `127.0.0.1` and has no authentication;
+- makes no telemetry, CDN, or external API requests;
+- stores recordings in a temporary run directory and deletes them after analysis;
+- keeps generated results only for the local server session;
+- is intended for local use, not remote deployment.
+
+If the browser does not open automatically, use the URL printed in the terminal.
+For a fixed port:
+
+```bash
+prosodiff ui --no-open-browser --port 7860
+```
 
 ## Recording protocol
 
-Recorded-level comparisons are only interpretable when every take uses:
+Between-take recorded-level comparisons are interpretable only when every take
+uses:
 
 1. the same speaker and exact text;
-2. the same device, room, microphone direction, gain, and distance;
+2. the same device, room, gain, microphone direction, and distance;
 3. one back-to-back recording session;
-4. disabled auto-gain, noise suppression, “voice enhancement,” and other automatic processing where possible;
-5. unclipped, unnormalized PCM WAV files.
+4. disabled auto-gain, noise suppression, echo cancellation, and voice enhancement
+   where possible;
+5. unclipped, unnormalized WAV files.
 
-The tool cannot verify these assumptions. It records them in the JSON and keeps microphone-sensitive measures visibly marked in the figure.
+Prosodiff cannot verify these assumptions. It records available capture provenance
+in JSON and marks microphone-sensitive measures in the figure.
 
 ## Method
 
-Prosodiff resamples analysis copies to 22.05 kHz but never peak-normalizes, denoises, pre-emphasizes, repairs pitch, or time-warps audio.
+Prosodiff resamples analysis copies to 22.05 kHz. It does not peak-normalize,
+denoise, pre-emphasize, repair pitch, or time-warp audio.
 
-- **Pitch:** `librosa.pyin`, 50–600 Hz by default. F0 selection follows pYIN's Viterbi-decoded voiced flag inside the detected utterance and outside pauses; voiced probability is retained as a diagnostic and controls only pale/solid contour emphasis. Summaries require at least 20 decoded frames and 25% eligible-frame coverage. Median F0 is compared on a take-balanced shared semitone reference. Pitch span is the IQR, reducing sensitivity to isolated extremes without silently deleting octave jumps.
-- **Recorded energy:** time-domain RMS in dBFS. The absolute active-frame median is retained for between-take deltas; contour display is relative to the pooled take median. This is recorded level—not calibrated SPL, loudness, intensity, or vocal effort.
-- **Energy-defined pauses:** an adaptive RMS threshold followed by removal of sub-50 ms energy islands and filling of sub-150 ms gaps. Internal gaps use a nominal 150 ms cutoff with one-hop (11.6 ms) boundary quantization. The detector repeats at ±3 dB and warns when the result changes materially.
-- **Time:** contours use raw seconds from the detected utterance onset. They are explicitly not phonetic alignment. Normalized coordinates are stored in JSON only as a coarse linear-time view and must not be treated as phone correspondence.
+- **Pitch:** `librosa.pyin`, 50–600 Hz by default. F0 follows pYIN's
+  Viterbi-decoded voiced flag inside the utterance and outside detected pauses.
+  Summaries require at least 20 decoded frames and 25% eligible-frame coverage.
+  Median F0 uses a take-balanced shared semitone reference; pitch span is the IQR.
+- **Recorded energy:** time-domain RMS in dBFS. Absolute active-frame level is
+  retained for pairwise deltas; displayed contours are relative to the pooled take
+  median. This is recorded level, not calibrated SPL, loudness, or vocal effort.
+- **Energy-defined pauses:** an adaptive RMS threshold, removal of sub-50 ms
+  energy islands, and filling of sub-150 ms gaps. Internal gaps use a nominal
+  150 ms cutoff with 11.6 ms hop quantization. A ±3 dB sensitivity check generates
+  a notice when results change materially.
+- **Time:** contours use raw seconds from detected utterance onset. They are not
+  phonetic alignment. Normalized coordinates in JSON are a coarse linear-time
+  view, not phone correspondence.
 
-All calculations are descriptive. A difference between two recordings is not evidence that listeners perceived a different intention.
+## Interpretation limits
+
+- pYIN probabilities are engineering diagnostics, not calibrated certainty.
+- Recording-chain changes can dominate recorded-energy differences.
+- Browser and operating-system audio processing may remain active even when the
+  recorder requests that it be disabled.
+- Same-speaker and same-text assumptions are supplied by the user and unverified.
+- Short-utterance acoustic deltas do not establish listener perception,
+  population effects, or cognitive outcomes.
 
 ## JSON contract
 
-The machine-readable output uses schema `prosodiff.explicit-delivery-attribute-delta`, version `0.2.0`. It contains:
+The machine-readable report uses schema
+`prosodiff.explicit-delivery-attribute-delta`, version `0.2.0`. It contains:
 
-- fixed analysis parameters and assumptions;
-- input metadata, utterance spans, pitch/energy/pause attributes, and quality warnings;
-- auditable raw-time and normalized-time contours, including candidate F0, decoded voiced flags, eligibility masks, and probability diagnostics, with unavailable values encoded as JSON `null`;
-- all unordered input pairs in order, always identified as `b_minus_a`;
-- pair-level reliability fields and confound warnings.
+- fixed analysis parameters and recording assumptions;
+- input metadata, utterance spans, acoustic attributes, and coded notices;
+- raw-time and normalized-time contours, candidate F0, voiced flags, masks, and
+  probability diagnostics;
+- every unordered pair in input order, identified as `b_minus_a`;
+- pair-level reliability fields and potential confounds.
 
-The schema is intentionally multidimensional. There is no aggregate “expressivity” or quality score.
-
-## Honest approximations
-
-- The live recorder first requests disabled echo cancellation, noise suppression, and auto-gain as exact constraints, then falls back when a browser cannot satisfy them. Reported track settings and privacy-preserving capture provenance are stored in JSON, but the browser, operating system, or audio device can still omit or misreport settings; use the WAV upload route for tightly controlled recording chains.
-- pYIN probabilities are an engineering confidence signal, not calibrated certainty; tracker errors can remain.
-- Energy measurements are dominated by recording chain changes if the protocol is not controlled.
-- Energy-defined gaps are not syntactic, pragmatic, or linguistic pause labels.
-- Same-speaker and same-text assumptions are supplied by the user and are not verified.
-- Short-utterance acoustic deltas do not establish population effects or listener cognition.
+Unavailable values are encoded as JSON `null`. There is no aggregate expressivity
+or quality score. Prosodiff is currently alpha software; schema changes will remain
+versioned and will be documented in releases.
 
 ## Development
 
-Run the synthetic test suite:
-
 ```bash
+git clone https://github.com/asera-1/prosodiff.git
+cd prosodiff
+uv sync --extra dev
 uv run pytest
+uv run prosodiff demo --output docs/prosodiff-card.png
 ```
 
-The tests generate audio inside temporary directories. No recordings or research datasets are stored in the repository.
+Tests use deterministic synthetic fixtures created inside temporary directories.
 
 ## Roadmap
 
 1. Add optional transcript-aware phone alignment while retaining raw-time views.
-2. Add batch manifests for ProsodyRAG reference-versus-synthesis evaluation and Flowent tutor-voice QA.
-3. Validate acoustic deltas against preregistered listener judgments rather than assuming perceptual relevance.
+2. Add batch manifests for ProsodyRAG evaluation and Flowent tutor-voice QA.
+3. Validate acoustic deltas against preregistered listener judgments.
 
-## Author and license
+## Citation, author, and license
 
-Created by **Abdalla Sera** ([asera-1](https://github.com/asera-1)). Released under the [MIT License](LICENSE).
+If Prosodiff supports your work, cite the software metadata in
+[`CITATION.cff`](https://github.com/asera-1/prosodiff/blob/main/CITATION.cff).
 
-Prosodiff’s authored source is MIT-licensed. Installed dependencies retain their own licenses; the locked librosa audio stack includes dynamically used or installed LGPL components such as `libsndfile` and `python-soxr`. They are not vendored or redistributed by this repository.
+Created by **Abdalla Sera** ([asera-1](https://github.com/asera-1)). Prosodiff's
+authored source is released under the
+[MIT License](https://github.com/asera-1/prosodiff/blob/main/LICENSE).
+
+Dependencies retain their own licenses. The locked librosa audio stack may install
+dynamically used LGPL components such as `libsndfile` and `python-soxr`; they are
+not vendored or redistributed by this repository.
