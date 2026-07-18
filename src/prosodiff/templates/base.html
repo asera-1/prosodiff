@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Local matched-delivery prosody comparison with explicit acoustic deltas.">
+    <title>{% block title %}Prosodiff{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+    <header class="site-header">
+      <a class="brand" href="{{ url_for('index') }}" aria-label="Prosodiff home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>Prosodiff</span>
+      </a>
+      <div class="local-badge"><span aria-hidden="true"></span> Local · private</div>
+    </header>
+    {% block content %}{% endblock %}
+    <footer class="site-footer">
+      <p>Descriptive acoustic attributes only · no emotion labels · no overall score</p>
+      <a href="https://github.com/asera-1/prosodiff">GitHub</a>
+    </footer>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

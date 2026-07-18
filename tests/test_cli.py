@@ -19,3 +19,10 @@ def test_compare_requires_at_least_two_files() -> None:
     result = runner.invoke(app, ["compare", "one.wav"])
     assert result.exit_code == 2
     assert "Expected 2 to 4" in result.output
+
+
+def test_ui_help_does_not_start_server() -> None:
+    result = runner.invoke(app, ["ui", "--help"])
+    assert result.exit_code == 0
+    assert "local browser interface" in result.output
+    assert "--no-open-browser" in result.output

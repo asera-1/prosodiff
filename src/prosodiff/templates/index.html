@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Compare deliveries · Prosodiff{% endblock %}
+{% block content %}
+<main id="main-content" class="page-shell">
+  <section class="intro" aria-labelledby="page-title">
+    <p class="eyebrow">MATCHED-DELIVERY ANALYSIS</p>
+    <h1 id="page-title">Same words.<br><span>Different delivery.</span></h1>
+    <p class="lede">Compare two to four WAV recordings of the same speaker saying the same text. Prosodiff makes pitch, energy, timing, and pauses explicit—without guessing emotion.</p>
+  </section>
+
+  <div class="workspace">
+    <form id="comparison-form" class="control-panel" action="{{ url_for('compare') }}" method="post" enctype="multipart/form-data" novalidate>
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      {% if error %}
+      <div class="error-summary" role="alert">
+        <strong>Check the comparison</strong>
+        <span>{{ error }}</span>
+        <small>For privacy, browsers require you to select the WAV files again.</small>
+      </div>
+      {% endif %}
+
+      <div class="step-heading">
+        <span>01</span>
+        <div>
+          <h2>Add matched takes</h2>
+          <p>WAV · 0.35–30 s each · 24 MB max</p>
+        </div>
+      </div>
+      <label class="file-picker" for="wav-input">
+        <span class="file-icon" aria-hidden="true">＋</span>
+        <strong>Choose 2–4 WAV files</strong>
+        <small>Recorded back-to-back with the same setup</small>
+        <input id="wav-input" name="wavs" type="file" accept=".wav,audio/wav,audio/x-wav" multiple required aria-describedby="file-status">
+      </label>
+      <p id="file-status" class="file-status" aria-live="polite">No recordings selected</p>
+      <fieldset id="take-labels" class="take-labels" hidden>
+        <legend>Take labels</legend>
+        <div id="take-list"></div>
+        <p class="field-help">Take 1 is the delta reference. Labels must be unique.</p>
+      </fieldset>
+
+      <div class="divider"></div>
+      <div class="step-heading">
+        <span>02</span>
+        <div>
+          <h2>Add context</h2>
+          <p>Optional, but useful on the report</p>
+        </div>
+      </div>
+      <label class="field-label" for="sentence">Matched sentence <span>optional</span></label>
+      <textarea id="sentence" name="text" rows="3" maxlength="300" placeholder="Heute schaffen wir das gemeinsam." aria-describedby="sentence-help"></textarea>
+      <p id="sentence-help" class="field-help">Prosodiff displays this text; it does not transcribe or verify it.</p>
+
+      <label class="protocol-check" for="protocol-ack">
+        <input id="protocol-ack" name="protocol_ack" value="yes" type="checkbox" required>
+        <span><strong>Matched recording protocol</strong><small>Same speaker, text, session, room, device, gain, and microphone distance.</small></span>
+      </label>
+
+      <button id="generate-button" class="primary-button" type="submit">
+        <span>Generate comparison</span><span aria-hidden="true">→</span>
+      </button>
+      <p class="privacy-note"><span aria-hidden="true">●</span> Runs on this computer. Audio is deleted immediately after analysis.</p>
+    </form>
+
+    <section class="preview-panel" aria-labelledby="preview-title">
+      <div class="preview-header">
+        <div>
+          <p class="eyebrow">OUTPUT</p>
+          <h2 id="preview-title">One figure. Auditable deltas.</h2>
+        </div>
+        <span>PNG + JSON</span>
+      </div>
+      <div id="preview-stage" class="preview-stage" aria-live="polite">
+        <div class="report-ghost" aria-hidden="true">
+          <div class="ghost-top"><i></i><i></i><i></i></div>
+          <div class="ghost-title"></div>
+          <div class="ghost-subtitle"></div>
+          <div class="ghost-legend"><i></i><i></i><i></i></div>
+          <div class="ghost-chart"><b></b><b></b><b></b></div>
+          <div class="ghost-chart short"><b></b><b></b><b></b></div>
+          <div class="ghost-metrics"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <div class="empty-copy">
+          <strong>Your 4:5 report appears here</strong>
+          <span>Raw-time contours · explicit B − A deltas · quality notices</span>
+        </div>
+        <div id="loading-state" class="loading-state" hidden>
+          <span class="spinner" aria-hidden="true"></span>
+          <strong>Analyzing recordings…</strong>
+          <span>The first run can take one to two minutes while local caches initialize.</span>
+        </div>
+      </div>
+      <div class="method-strip">
+        <span><b>Pitch</b> pYIN confidence mask</span>
+        <span><b>Energy</b> recorded RMS</span>
+        <span><b>Pauses</b> ±3 dB sensitivity</span>
+      </div>
+      <p class="interpretation-note"><strong>Interpretation boundary</strong> A measured acoustic difference is not evidence that listeners perceived a different intention.</p>
+    </section>
+  </div>
+</main>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='app.js') }}" defer></script>{% endblock %}

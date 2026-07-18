@@ -19,6 +19,22 @@ Built as a side tool for retrieval-augmented expressive TTS research (ProsodyRAG
 
 Prosodiff does **not** infer emotion, speaking rate, linguistic boundaries, listener response, naturalness, vocal effort, or an overall prosody score.
 
+## Local browser interface
+
+Start the private, loopback-only interface:
+
+```bash
+uv run prosodiff ui
+```
+
+Prosodiff opens a browser page where you can select two to four WAV files, edit their labels, add the matched sentence, generate the same 4:5 card and JSON as the CLI, and download both outputs. The scientific analysis and schema are identical in both interfaces.
+
+![Prosodiff local browser interface](docs/prosodiff-ui.png)
+
+The server binds only to `127.0.0.1`; it has no telemetry, CDN assets, or external API calls. Uploaded recordings use random temporary filenames and are deleted immediately after the analysis succeeds or fails. Generated PNG/JSON results are deleted when the server stops. Do not modify the code to expose this development interface on `0.0.0.0` or deploy it publicly.
+
+If a browser does not open automatically, copy the local URL printed in the terminal. Use `uv run prosodiff ui --no-open-browser --port 7860` when you want a fixed port.
+
 ## Fresh-clone quickstart
 
 Requires Python 3.10+ and [uv](https://docs.astral.sh/uv/).

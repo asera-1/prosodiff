@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import webbrowser
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Annotated, Optional
@@ -181,3 +182,58 @@ def demo(
         raise typer.Exit(code=2) from exc
     typer.secho(f"Created {image_path}", fg=typer.colors.GREEN)
     typer.echo(f"Wrote   {report_path}")
+
+
+@app.command()
+def ui(
+    port: Annotated[
+        int,
+        typer.Option(
+            "--port",
+            min=0,
+            max=65_535,
+            help="Loopback port. Use 0 to select an available port automatically.",
+        ),
+    ] = 0,
+    open_browser: Annotated[
+        bool,
+        typer.Option(
+            "--open-browser/--no-open-browser",
+            help="Open the local interface in the default browser.",
+        ),
+    ] = True,
+) -> None:
+    """Open the local browser interface for matched-delivery comparison."""
+
+    from werkzeug.serving import make_server
+
+    from prosodiff.web import create_app
+
+    flask_app = create_app()
+    try:
+        server = make_server("127.0.0.1", port, flask_app, threaded=True)
+    except OSError as exc:
+        typer.secho(
+            f"Error: could not start the local interface: {exc}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2) from exc
+
+    actual_port = int(server.server_port)
+    url = f"http://127.0.0.1:{actual_port}/"
+    typer.secho("Prosodiff interface is ready.", fg=typer.colors.GREEN)
+    typer.echo(url)
+    typer.echo(
+        "Press Ctrl+C to stop. Uploaded audio stays local and is deleted after analysis."
+    )
+    if open_browser:
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        typer.echo("\nStopping Prosodiff.")
+    finally:
+        server.shutdown()
+        server.server_close()
+        flask_app.extensions["prosodiff_results"].close()

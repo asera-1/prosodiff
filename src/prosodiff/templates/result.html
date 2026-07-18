@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Comparison ready · Prosodiff{% endblock %}
+{% block content %}
+<main id="main-content" class="result-shell">
+  <header class="result-heading">
+    <div>
+      <p class="eyebrow success-label"><span aria-hidden="true">✓</span> ANALYSIS COMPLETE</p>
+      <h1>Comparison ready.</h1>
+      <p>{{ record.comparison.takes|length }} matched takes · every pair reported as B − A</p>
+    </div>
+    <a class="secondary-button" href="{{ url_for('index') }}">← Analyze another</a>
+  </header>
+
+  <div class="result-layout">
+    <section class="card-preview" aria-labelledby="card-title">
+      <div class="result-section-title">
+        <div><p class="eyebrow">4:5 REPORT</p><h2 id="card-title">Delivery-attribute card</h2></div>
+        <span>2160 × 2700</span>
+      </div>
+      <img src="{{ url_for('result_image', run_id=record.run_id) }}" alt="Prosodiff raw-time comparison card for {{ record.comparison.takes|length }} matched takes{% if record.comparison.text %}: {{ record.comparison.text }}{% endif %}.">
+      <div class="download-row">
+        <a class="primary-button" href="{{ url_for('download_image', run_id=record.run_id) }}">Download PNG <span aria-hidden="true">↓</span></a>
+        <a class="secondary-button" href="{{ url_for('download_json', run_id=record.run_id) }}">Download JSON <span aria-hidden="true">↓</span></a>
+      </div>
+    </section>
+
+    <aside class="result-details">
+      {% if record.comparison.text %}
+      <section>
+        <p class="eyebrow">MATCHED SENTENCE</p>
+        <blockquote>“{{ record.comparison.text }}”</blockquote>
+      </section>
+      {% endif %}
+      <section>
+        <div class="result-section-title compact"><div><p class="eyebrow">TAKES</p><h2>Measured attributes</h2></div></div>
+        <div class="take-summary-list">
+          {% for take in record.comparison.takes %}
+          <article class="take-summary take-{{ loop.index }}">
+            <header><span class="take-symbol" aria-hidden="true"></span><strong>T{{ loop.index }} · {{ take.label }}</strong>{% if loop.first %}<small>reference</small>{% endif %}</header>
+            <dl>
+              <div><dt>Duration</dt><dd>{{ "%.2f"|format(take.metrics.utterance_duration_s) }} s</dd></div>
+              <div><dt>Median F0</dt><dd>{% if take.metrics.f0_median_hz is not none %}{{ "%.1f"|format(take.metrics.f0_median_hz) }} Hz{% else %}N/A{% endif %}</dd></div>
+              <div><dt>Pitch span</dt><dd>{% if take.metrics.f0_iqr_st is not none %}{{ "%.1f"|format(take.metrics.f0_iqr_st) }} st{% else %}N/A{% endif %}</dd></div>
+              <div><dt>Pause share</dt><dd>{{ "%.1f"|format(take.metrics.pause_fraction * 100) }}%</dd></div>
+            </dl>
+          </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section>
+        <div class="result-section-title compact"><div><p class="eyebrow">PAIRWISE</p><h2>Explicit deltas</h2></div></div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Pair</th><th>Duration</th><th>Pitch</th><th>Pause</th></tr></thead>
+            <tbody>
+              {% for pair in record.comparison.pairs %}
+              <tr>
+                <th>{{ labels[pair.b] }} − {{ labels[pair.a] }}</th>
+                <td>{{ "%+.1f"|format(pair.duration_percent) }}%</td>
+                <td>{% if pair.f0_median_st is not none %}{{ "%+.1f"|format(pair.f0_median_st) }} st{% else %}N/A{% endif %}</td>
+                <td>{{ "%+.1f"|format(pair.pause_fraction_percentage_points) }} pp</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {% if warnings %}
+      <details class="notices">
+        <summary><span>Analysis notices</span><b>{{ warnings|length }}</b></summary>
+        <ul>{% for warning in warnings %}<li>{{ warning }}</li>{% endfor %}</ul>
+      </details>
+      {% endif %}
+      <p class="privacy-note result-privacy"><span aria-hidden="true">●</span> Source WAVs deleted. Results disappear when this local server stops.</p>
+    </aside>
+  </div>
+</main>
+{% endblock %}
