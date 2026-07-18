@@ -378,6 +378,7 @@ class Comparison:
                 "pause": {
                     "minimum_pause_ms": self.settings.minimum_pause_ms,
                     "maximum_noise_burst_ms": (self.settings.maximum_noise_burst_ms),
+                    "edge_pad_ms": self.settings.edge_pad_ms,
                     "sensitivity_db": self.settings.pause_sensitivity_db,
                 },
             },

@@ -31,6 +31,7 @@
     "pause": {
       "minimum_pause_ms": 150.0,
       "maximum_noise_burst_ms": 50.0,
+      "edge_pad_ms": 50.0,
       "sensitivity_db": 3.0
     }
   },

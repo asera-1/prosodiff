@@ -470,7 +470,7 @@ def _figure(comparison: Comparison) -> Figure:
         fontweight="bold",
         color=_TEXT,
     )
-    metric_grid = grid[75:93, :].subgridspec(2, 3, hspace=0.78, wspace=0.46)
+    metric_grid = grid[74:90, :].subgridspec(2, 3, hspace=0.78, wspace=0.46)
     for metric_index, (title, values, formatter) in enumerate(
         _metric_specs(comparison)
     ):
@@ -480,12 +480,12 @@ def _figure(comparison: Comparison) -> Figure:
     summary = _observed_summary(comparison)
     figure.text(
         0.075,
-        0.092,
+        0.086,
         summary,
         fontsize=7.4,
         color=_TEXT,
         bbox={
-            "boxstyle": "round,pad=0.45",
+            "boxstyle": "round,pad=0.35",
             "facecolor": _PANEL,
             "edgecolor": _GRID,
             "linewidth": 0.6,

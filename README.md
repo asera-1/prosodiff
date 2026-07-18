@@ -1,12 +1,26 @@
 # Prosodiff
 
+[![tests](https://github.com/asera-1/prosodiff/actions/workflows/tests.yml/badge.svg)](https://github.com/asera-1/prosodiff/actions/workflows/tests.yml)
+
 **Same words. Different delivery—made visible.**
 
 Prosodiff is a small, training-free CLI for comparing two to four recordings of the same speaker saying the same text in different ways. It exports a publication-grade 4:5 figure and a versioned JSON record of explicit delivery-attribute deltas—without predicting emotions or collapsing the comparison into a single score.
 
-![Prosodiff synthetic demonstration](docs/prosodiff-card.png)
+![Prosodiff synthetic demonstration](https://raw.githubusercontent.com/asera-1/prosodiff/main/docs/prosodiff-card.png)
 
 Built as a side tool for retrieval-augmented expressive TTS research (ProsodyRAG) at Universität Osnabrück.
+
+Try the complete no-audio demonstration without cloning or installing:
+
+```bash
+uvx prosodiff demo --output prosodiff-card.png
+```
+
+Or install the command permanently:
+
+```bash
+pip install prosodiff
+```
 
 ## What it reports
 
@@ -29,7 +43,7 @@ uv run prosodiff ui
 
 Prosodiff opens a browser page where you can record two to four takes directly from the microphone, replay or redo each take, edit labels, and generate the same 4:5 card and JSON as the CLI. Each take gets a nonblocking level/clipping check before analysis, and the page recommends a redo when the recorded level is below −35 dBFS, clipping is detected, the device changes, or a take differs from the reference by more than 6 dB. Allow microphone access when prompted. Selecting existing WAV files remains available as a secondary option.
 
-![Prosodiff local browser interface](docs/prosodiff-ui.png)
+![Prosodiff local browser interface](https://raw.githubusercontent.com/asera-1/prosodiff/main/docs/prosodiff-ui.png)
 
 The server binds only to `127.0.0.1`; it has no telemetry, CDN assets, or external API calls. Live captures are encoded as mono PCM WAVs in the browser. Recordings use random temporary filenames on the server and are deleted immediately after the analysis succeeds or fails. Generated PNG/JSON results are deleted when the server stops. Do not modify the code to expose this development interface on `0.0.0.0` or deploy it publicly.
 

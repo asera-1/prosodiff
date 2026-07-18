@@ -101,6 +101,7 @@ def test_json_schema_is_standard_and_auditable(
     assert "NaN" not in encoded
     assert payload["schema"] == "prosodiff.explicit-delivery-attribute-delta"
     assert payload["schema_version"] == "0.2.0"
+    assert payload["analysis"]["pause"]["edge_pad_ms"] == 50.0
     assert payload["analysis"]["pitch"]["voiced_probability_role"] == "diagnostic_only"
     assert len(payload["takes"]) == 4
     assert len(payload["pairs"]) == 6
