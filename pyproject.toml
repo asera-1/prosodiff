@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "prosodiff"
+version = "0.1.0"
+description = "One-command, interpretable acoustic deltas for matched speech deliveries."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Abdalla Sera" },
+]
+keywords = [
+  "prosody",
+  "speech",
+  "expressive-tts",
+  "evaluation",
+  "voice-analysis",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Multimedia :: Sound/Audio :: Analysis",
+  "Typing :: Typed",
+]
+dependencies = [
+  "librosa>=0.11,<0.12",
+  "matplotlib>=3.9,<4",
+  "numpy>=1.26,<3",
+  "soundfile>=0.12,<1",
+  "typer>=0.15,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3,<9",
+]
+
+[project.scripts]
+prosodiff = "prosodiff.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/asera-1/prosodiff"
+Repository = "https://github.com/asera-1/prosodiff"
+Issues = "https://github.com/asera-1/prosodiff/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/prosodiff"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]

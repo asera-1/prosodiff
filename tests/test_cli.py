@@ -1,0 +1,21 @@
+from __future__ import annotations
+
+from typer.testing import CliRunner
+
+from prosodiff import __version__
+from prosodiff.cli import app
+
+
+runner = CliRunner()
+
+
+def test_version() -> None:
+    result = runner.invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert result.stdout.strip() == f"prosodiff {__version__}"
+
+
+def test_compare_requires_at_least_two_files() -> None:
+    result = runner.invoke(app, ["compare", "one.wav"])
+    assert result.exit_code == 2
+    assert "Expected 2 to 4" in result.output
