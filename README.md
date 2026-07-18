@@ -27,11 +27,11 @@ Start the private, loopback-only interface:
 uv run prosodiff ui
 ```
 
-Prosodiff opens a browser page where you can select two to four WAV files, edit their labels, add the matched sentence, generate the same 4:5 card and JSON as the CLI, and download both outputs. The scientific analysis and schema are identical in both interfaces.
+Prosodiff opens a browser page where you can record two to four takes directly from the microphone, replay or redo each take, edit labels, and generate the same 4:5 card and JSON as the CLI. Allow microphone access when prompted. Selecting existing WAV files remains available as a secondary option.
 
 ![Prosodiff local browser interface](docs/prosodiff-ui.png)
 
-The server binds only to `127.0.0.1`; it has no telemetry, CDN assets, or external API calls. Uploaded recordings use random temporary filenames and are deleted immediately after the analysis succeeds or fails. Generated PNG/JSON results are deleted when the server stops. Do not modify the code to expose this development interface on `0.0.0.0` or deploy it publicly.
+The server binds only to `127.0.0.1`; it has no telemetry, CDN assets, or external API calls. Live captures are encoded as mono PCM WAVs in the browser. Recordings use random temporary filenames on the server and are deleted immediately after the analysis succeeds or fails. Generated PNG/JSON results are deleted when the server stops. Do not modify the code to expose this development interface on `0.0.0.0` or deploy it publicly.
 
 If a browser does not open automatically, copy the local URL printed in the terminal. Use `uv run prosodiff ui --no-open-browser --port 7860` when you want a fixed port.
 
@@ -102,6 +102,7 @@ The schema is intentionally multidimensional. There is no aggregate “expressiv
 
 ## Honest approximations
 
+- The live recorder requests disabled echo cancellation, noise suppression, and auto-gain, but the browser, operating system, or audio device may ignore those preferences; use the WAV upload route for tightly controlled recording chains.
 - pYIN probabilities are an engineering confidence signal, not calibrated certainty; tracker errors can remain.
 - Energy measurements are dominated by recording chain changes if the protocol is not controlled.
 - Energy-defined gaps are not syntactic, pragmatic, or linguistic pause labels.

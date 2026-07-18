@@ -63,6 +63,9 @@ button, a, input, textarea { -webkit-tap-highlight-color: transparent; }
 .file-picker input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
 .file-icon { display: grid; place-items: center; width: 32px; height: 32px; margin-bottom: 5px; border-radius: 50%; background: var(--primary); color: white; font-size: 20px; }
 .file-picker strong { font-size: 14px; }.file-picker small { color: var(--muted); font-size: 11px; }
+.file-picker.compact { min-height: 72px; flex-direction: row; justify-content: flex-start; gap: 12px; padding: 12px; text-align: left; }
+.file-picker.compact .file-icon { flex: 0 0 32px; margin: 0; }
+.file-picker.compact > span:not(.file-icon) { min-width: 0; display: flex; flex-direction: column; }
 .file-status { min-height: 20px; margin: 9px 0 0; color: var(--muted); font-size: 11px; text-align: center; }
 .file-status[data-valid="true"] { color: var(--green); font-weight: 650; }
 .take-labels { min-width: 0; margin: 18px 0 0; padding: 0; border: 0; }
@@ -82,6 +85,48 @@ button, a, input, textarea { -webkit-tap-highlight-color: transparent; }
 textarea { width: 100%; min-height: 86px; resize: vertical; padding: 11px 12px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--surface); color: var(--ink); }
 textarea::placeholder { color: #95a0aa; }
 .field-help { margin: 6px 0 0; color: var(--muted); font-size: 10px; }
+.live-recorder { margin-top: 17px; padding: 15px; border: 1px solid var(--line); border-radius: 11px; background: var(--surface-subtle); }
+.live-recorder.is-recording { border-color: #d9867f; background: #fff8f7; }
+.recorder-status-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.recorder-status-row > div { display: flex; align-items: center; gap: 9px; }
+.recorder-status-row strong { font-size: 12px; }
+.recorder-status-row time { color: var(--muted); font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
+.microphone-mark { position: relative; width: 20px; height: 20px; border-radius: 50%; background: var(--primary-soft); }
+.microphone-mark::before { content: ""; position: absolute; left: 8px; top: 4px; width: 4px; height: 8px; border: 1.5px solid var(--primary); border-radius: 4px; }
+.microphone-mark::after { content: ""; position: absolute; left: 6px; top: 9px; width: 8px; height: 5px; border-bottom: 1.5px solid var(--primary); border-radius: 0 0 6px 6px; }
+.is-recording .microphone-mark { background: #fbe2df; }
+.is-recording .microphone-mark::before, .is-recording .microphone-mark::after { border-color: var(--danger); }
+.level-track { height: 5px; margin: 13px 0 10px; overflow: hidden; border-radius: 999px; background: var(--line); }
+.level-track span { display: block; width: 100%; height: 100%; border-radius: inherit; background: var(--green); transform: scaleX(0); transform-origin: left center; transition: transform 80ms linear; }
+.is-recording .level-track span { background: var(--danger); }
+.recording-status { min-height: 32px; margin: 0 0 10px; color: var(--muted); font-size: 10px; }
+.recording-error { margin: 0 0 10px; padding: 9px 10px; border-radius: 7px; background: var(--danger-soft); color: var(--danger); font-size: 10px; }
+.recorder-actions { display: grid; }
+.record-button, .stop-button { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 9px; width: 100%; padding: 10px 14px; border-radius: 8px; font-weight: 750; font-size: 12px; cursor: pointer; }
+.record-button { border: 1px solid var(--primary); background: var(--primary); color: white; }
+.record-button:hover:not(:disabled) { border-color: var(--primary-dark); background: var(--primary-dark); }
+.record-button:disabled { opacity: .5; cursor: not-allowed; }
+.stop-button { border: 1px solid var(--danger); background: var(--danger); color: white; }
+.stop-button:hover { background: #88241e; }
+.record-dot { width: 10px; height: 10px; border: 2px solid white; border-radius: 50%; background: #f0958e; }
+.stop-square { width: 9px; height: 9px; border-radius: 1px; background: white; }
+.live-recorder > small { display: block; margin-top: 8px; color: var(--muted); font-size: 9px; text-align: center; }
+.recorded-takes { min-width: 0; margin: 17px 0 0; padding: 0; border: 0; }
+.recorded-takes legend { padding: 0; font-size: 12px; font-weight: 750; }
+.recorded-take { display: grid; grid-template-columns: minmax(0, 1fr) minmax(96px, .65fr); gap: 8px 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.recorded-take header { grid-column: 1 / -1; display: grid; grid-template-columns: 12px 1fr auto; gap: 8px; align-items: center; color: inherit; }
+.recorded-take header strong { color: var(--ink); font-size: 11px; }
+.recorded-take header small { color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .04em; }
+.recorded-take audio { width: 100%; height: 36px; }
+.recorded-take label { color: var(--muted); font-size: 8px; text-transform: uppercase; letter-spacing: .06em; }
+.recorded-take input { width: 100%; min-height: 36px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--ink); font-size: 11px; text-transform: none; letter-spacing: 0; }
+.recorded-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 7px; }
+.recorded-actions button { min-height: 30px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--muted); font-size: 9px; cursor: pointer; }
+.recorded-actions button:hover { border-color: var(--line-strong); color: var(--ink); }
+.upload-option { margin-top: 14px; border-top: 1px solid var(--line); }
+.upload-option summary { padding: 13px 0 2px; color: var(--primary-dark); font-size: 10px; font-weight: 700; cursor: pointer; }
+.upload-option-body { padding-top: 11px; }
+.protocol-heading { margin-bottom: 4px; }
 .protocol-check { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; margin: 20px 0; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-subtle); cursor: pointer; }
 .protocol-check input { width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--primary); }
 .protocol-check span { display: flex; flex-direction: column; gap: 2px; font-size: 11px; }.protocol-check small { color: var(--muted); line-height: 1.4; }
@@ -169,6 +214,7 @@ thead th { color: var(--muted); font-size: 8px; text-transform: uppercase; lette
   .preview-stage { min-height: 420px; }
   .method-strip { grid-template-columns: 1fr; }
   .take-row { grid-template-columns: 12px minmax(0, 1fr); }.take-row label { grid-column: 2; }
+  .recorded-take { grid-template-columns: 1fr; }.recorded-take header, .recorded-actions { grid-column: 1; }.recorded-actions { justify-content: flex-start; }
   .result-heading { align-items: flex-start; flex-direction: column; }.result-heading .secondary-button { width: 100%; }
   .take-summary dl { grid-template-columns: repeat(2, 1fr); row-gap: 9px; }
   .download-row { grid-template-columns: 1fr; }

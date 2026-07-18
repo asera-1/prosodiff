@@ -81,9 +81,15 @@ def test_index_is_accessible_and_hardened(tmp_path: Path) -> None:
     assert b'<html lang="en">' in response.data
     assert b'name="csrf_token" value="test-token"' in response.data
     assert b'id="comparison-form"' in response.data
+    assert b'id="record-button"' in response.data
+    assert b"Record matched takes" in response.data
+    assert b"Use existing WAV files instead" in response.data
     assert response.headers["Cache-Control"] == "no-store"
-    assert "frame-ancestors 'none'" in response.headers["Content-Security-Policy"]
+    content_policy = response.headers["Content-Security-Policy"]
+    assert "frame-ancestors 'none'" in content_policy
+    assert "media-src 'self' blob:" in content_policy
     assert response.headers["X-Frame-Options"] == "DENY"
+    assert "microphone=(self)" in response.headers["Permissions-Policy"]
 
 
 def test_compare_requires_valid_csrf_and_file_count(tmp_path: Path) -> None:

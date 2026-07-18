@@ -221,15 +221,15 @@ def create_app(
     def secure_local_response(response):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; img-src 'self'; style-src 'self'; "
-            "script-src 'self'; object-src 'none'; base-uri 'none'; "
+            "default-src 'self'; img-src 'self'; media-src 'self' blob:; "
+            "style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; "
             "form-action 'self'; frame-ancestors 'none'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Permissions-Policy"] = (
-            "camera=(), microphone=(), geolocation=(), payment=()"
+            "camera=(), microphone=(self), geolocation=(), payment=()"
         )
         return response
 

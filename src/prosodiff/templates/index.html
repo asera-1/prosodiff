@@ -5,7 +5,7 @@
   <section class="intro" aria-labelledby="page-title">
     <p class="eyebrow">MATCHED-DELIVERY ANALYSIS</p>
     <h1 id="page-title">Same words.<br><span>Different delivery.</span></h1>
-    <p class="lede">Compare two to four WAV recordings of the same speaker saying the same text. Prosodiff makes pitch, energy, timing, and pauses explicit—without guessing emotion.</p>
+    <p class="lede">Record two to four deliveries of the same sentence, then compare pitch, energy, timing, and pauses—without guessing emotion.</p>
   </section>
 
   <div class="workspace">
@@ -22,34 +22,71 @@
       <div class="step-heading">
         <span>01</span>
         <div>
-          <h2>Add matched takes</h2>
-          <p>WAV · 0.35–30 s each · 24 MB max</p>
+          <h2>Record matched takes</h2>
+          <p>Record 2–4 deliveries, one after another</p>
         </div>
       </div>
-      <label class="file-picker" for="wav-input">
-        <span class="file-icon" aria-hidden="true">＋</span>
-        <strong>Choose 2–4 WAV files</strong>
-        <small>Recorded back-to-back with the same setup</small>
-        <input id="wav-input" name="wavs" type="file" accept=".wav,audio/wav,audio/x-wav" multiple required aria-describedby="file-status">
-      </label>
-      <p id="file-status" class="file-status" aria-live="polite">No recordings selected</p>
-      <fieldset id="take-labels" class="take-labels" hidden>
-        <legend>Take labels</legend>
-        <div id="take-list"></div>
-        <p class="field-help">Take 1 is the delta reference. Labels must be unique.</p>
+
+      <label class="field-label" for="sentence">Sentence to repeat <span>optional</span></label>
+      <textarea id="sentence" name="text" rows="2" maxlength="300" placeholder="Heute schaffen wir das gemeinsam." aria-describedby="sentence-help"></textarea>
+      <p id="sentence-help" class="field-help">Keep the words identical and change only the delivery.</p>
+
+      <section id="live-recorder" class="live-recorder" aria-labelledby="recorder-title">
+        <div class="recorder-status-row">
+          <div>
+            <span class="microphone-mark" aria-hidden="true"></span>
+            <strong id="recorder-title">Microphone ready</strong>
+          </div>
+          <time id="recording-time" datetime="PT0S">00:00.0</time>
+        </div>
+        <div class="level-track" aria-hidden="true"><span id="level-value"></span></div>
+        <p id="recording-status" class="recording-status" aria-live="polite">Start with a neutral or reference delivery.</p>
+        <p id="recording-error" class="recording-error" role="alert" hidden></p>
+        <div class="recorder-actions">
+          <button id="record-button" class="record-button" type="button">
+            <span class="record-dot" aria-hidden="true"></span>
+            <span>Record Take 1</span>
+          </button>
+          <button id="stop-button" class="stop-button" type="button" hidden>
+            <span class="stop-square" aria-hidden="true"></span>
+            <span>Stop and save</span>
+          </button>
+        </div>
+        <small>Maximum 30 seconds. Browser processing is requested off, but not guaranteed.</small>
+      </section>
+
+      <fieldset id="recorded-takes" class="recorded-takes" hidden>
+        <legend>Recorded takes</legend>
+        <div id="recorded-list"></div>
+        <p id="recording-count" class="field-help" aria-live="polite"></p>
       </fieldset>
 
+      <details id="upload-option" class="upload-option">
+        <summary>Use existing WAV files instead</summary>
+        <div class="upload-option-body">
+          <label class="file-picker compact" for="wav-input">
+            <span class="file-icon" aria-hidden="true">＋</span>
+            <span><strong>Choose 2–4 WAV files</strong><small>0.35–30 s each · 24 MB maximum</small></span>
+            <input id="wav-input" name="wavs" type="file" accept=".wav,audio/wav,audio/x-wav" multiple required aria-describedby="file-status">
+          </label>
+          <p id="file-status" class="file-status" aria-live="polite">No recordings selected</p>
+          <fieldset id="take-labels" class="take-labels" hidden>
+            <legend>Take labels</legend>
+            <div id="take-list"></div>
+            <p class="field-help">Take 1 is the delta reference. Labels must be unique.</p>
+          </fieldset>
+        </div>
+      </details>
+      <noscript><p class="recording-error">Live recording requires JavaScript. Use existing WAV files instead.</p></noscript>
+
       <div class="divider"></div>
-      <div class="step-heading">
+      <div class="step-heading protocol-heading">
         <span>02</span>
         <div>
-          <h2>Add context</h2>
-          <p>Optional, but useful on the report</p>
+          <h2>Generate the comparison</h2>
+          <p>Check the recording assumptions first</p>
         </div>
       </div>
-      <label class="field-label" for="sentence">Matched sentence <span>optional</span></label>
-      <textarea id="sentence" name="text" rows="3" maxlength="300" placeholder="Heute schaffen wir das gemeinsam." aria-describedby="sentence-help"></textarea>
-      <p id="sentence-help" class="field-help">Prosodiff displays this text; it does not transcribe or verify it.</p>
 
       <label class="protocol-check" for="protocol-ack">
         <input id="protocol-ack" name="protocol_ack" value="yes" type="checkbox" required>
